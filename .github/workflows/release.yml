@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    name: Build + attach signed DMG
+    runs-on: macos-15
+    env:
+      # Map secrets to env so they can be tested in `if:` conditions.
+      HAS_SIGNING: ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
+      HAS_NOTARY: ${{ secrets.NOTARY_APPLE_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Developer ID certificate
+        if: env.HAS_SIGNING == 'true'
+        env:
+          CERT_P12: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Store notarization credentials
+        if: env.HAS_NOTARY == 'true'
+        run: |
+          xcrun notarytool store-credentials passeport-notary \
+            --apple-id "${{ secrets.NOTARY_APPLE_ID }}" \
+            --team-id "${{ secrets.NOTARY_TEAM_ID }}" \
+            --password "${{ secrets.NOTARY_PASSWORD }}"
+
+      - name: Build DMG
+        env:
+          SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
+          TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+        run: |
+          # No signing identity configured → ad-hoc (make-dmg.sh treats "-" as
+          # ad-hoc). With one, it signs, hardened-runtime, and notarizes.
+          export SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+          if [ "${{ env.HAS_NOTARY }}" = "true" ]; then
+            export NOTARY_PROFILE="passeport-notary"
+          fi
+          scripts/make-dmg.sh
+
+      - name: Attach DMG to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Passeport.dmg
+          fail_on_unmatched_files: true

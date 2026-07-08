@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The root seed is stored device-local in the file-based keychain, so no
+         keychain-access-group (and therefore no provisioning profile) is
+         needed. This lets the app be signed ad-hoc or with Developer ID
+         without an application-identifier entitlement. -->
+</dict>
+</plist>

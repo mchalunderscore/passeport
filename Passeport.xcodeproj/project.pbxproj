@@ -1,0 +1,625 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01F001000000000000000001 /* PasseportApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000001 /* PasseportApp.swift */; };
+		01F001000000000000000002 /* CoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000002 /* CoreClient.swift */; };
+		01F001000000000000000003 /* CoreLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000003 /* CoreLocator.swift */; };
+		01F001000000000000000004 /* DerivedIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000004 /* DerivedIdentity.swift */; };
+		01F001000000000000000005 /* PasseportError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000005 /* PasseportError.swift */; };
+		01F00100000000000000000A /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F00000000000000000000A /* AppModel.swift */; };
+		01F00100000000000000000D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F00000000000000000000D /* ContentView.swift */; };
+		01F00100000000000000000E /* KeyDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F00000000000000000000E /* KeyDetailView.swift */; };
+		01F001000000000000000010 /* ScdBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000010 /* ScdBridge.swift */; };
+		01F001000000000000000012 /* GnuPGConfigurator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000012 /* GnuPGConfigurator.swift */; };
+		01F001000000000000000013 /* SeedBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000013 /* SeedBackup.swift */; };
+		01F001000000000000000014 /* DeterminismCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000014 /* DeterminismCheck.swift */; };
+		01F001000000000000000015 /* GitConfigurator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000015 /* GitConfigurator.swift */; };
+		01F001000000000000000016 /* LaunchAgentInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000016 /* LaunchAgentInstaller.swift */; };
+		01F001000000000000000017 /* OperationApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000017 /* OperationApprovalView.swift */; };
+		01F001000000000000000018 /* Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000018 /* Hex.swift */; };
+		01F001000000000000000021 /* ClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000021 /* ClassificationTests.swift */; };
+		01F001000000000000000022 /* GnuPGConfiguratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000022 /* GnuPGConfiguratorTests.swift */; };
+		90CC102A2FFD5BE1009F3881 /* SeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90CC10292FFD5BE1009F3881 /* SeedStore.swift */; };
+		01F00100000000000000001A /* Passeport.icon in Resources */ = {isa = PBXBuildFile; fileRef = 904746D62FFD9EFE0033B1CE /* Passeport.icon */; };
+		01F00100000000000000001B /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01F00000000000000000001C /* Media.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		01F00B000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 01F005000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 01F004000000000000000001;
+			remoteInfo = Passeport;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		01F000000000000000000001 /* PasseportApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasseportApp.swift; sourceTree = "<group>"; };
+		01F000000000000000000002 /* CoreClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClient.swift; sourceTree = "<group>"; };
+		01F000000000000000000003 /* CoreLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreLocator.swift; sourceTree = "<group>"; };
+		01F000000000000000000004 /* DerivedIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DerivedIdentity.swift; sourceTree = "<group>"; };
+		01F000000000000000000005 /* PasseportError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasseportError.swift; sourceTree = "<group>"; };
+		01F00000000000000000000A /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		01F00000000000000000000D /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		01F00000000000000000000E /* KeyDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyDetailView.swift; sourceTree = "<group>"; };
+		01F00000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		01F000000000000000000010 /* ScdBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScdBridge.swift; sourceTree = "<group>"; };
+		01F000000000000000000011 /* Passeport.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Passeport.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		01F000000000000000000012 /* GnuPGConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnuPGConfigurator.swift; sourceTree = "<group>"; };
+		01F000000000000000000013 /* SeedBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedBackup.swift; sourceTree = "<group>"; };
+		01F000000000000000000014 /* DeterminismCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeterminismCheck.swift; sourceTree = "<group>"; };
+		01F000000000000000000015 /* GitConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitConfigurator.swift; sourceTree = "<group>"; };
+		01F000000000000000000016 /* LaunchAgentInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAgentInstaller.swift; sourceTree = "<group>"; };
+		01F000000000000000000017 /* OperationApprovalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationApprovalView.swift; sourceTree = "<group>"; };
+		01F000000000000000000018 /* Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Hex.swift; sourceTree = "<group>"; };
+		01F000000000000000000021 /* ClassificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassificationTests.swift; sourceTree = "<group>"; };
+		01F000000000000000000022 /* GnuPGConfiguratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnuPGConfiguratorTests.swift; sourceTree = "<group>"; };
+		01F000000000000000000023 /* PasseportTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PasseportTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		904746D62FFD9EFE0033B1CE /* Passeport.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Passeport.icon; sourceTree = "<group>"; };
+		01F00000000000000000001C /* Media.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Media.xcassets; sourceTree = "<group>"; };
+		90CC10282FFD5897009F3881 /* Passeport.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Passeport.entitlements; sourceTree = "<group>"; };
+		90CC10292FFD5BE1009F3881 /* SeedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedStore.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		01F002000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		01F002000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		01F003000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				01F003000000000000000003 /* Sources/PasseportApp */,
+				01F003000000000000000022 /* Tests/PasseportTests */,
+				01F003000000000000000009 /* Resources */,
+				01F00300000000000000000A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		01F003000000000000000003 /* Sources/PasseportApp */ = {
+			isa = PBXGroup;
+			children = (
+				01F003000000000000000004 /* App */,
+				01F003000000000000000005 /* Core */,
+				01F003000000000000000023 /* Bridge */,
+				01F003000000000000000024 /* Integrations */,
+				01F003000000000000000006 /* Keychain */,
+				01F003000000000000000007 /* State */,
+				01F003000000000000000008 /* Views */,
+				01F003000000000000000021 /* Support */,
+			);
+			path = Sources/PasseportApp;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000004 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				01F000000000000000000001 /* PasseportApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000005 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				01F000000000000000000002 /* CoreClient.swift */,
+				01F000000000000000000003 /* CoreLocator.swift */,
+				01F000000000000000000004 /* DerivedIdentity.swift */,
+				01F000000000000000000005 /* PasseportError.swift */,
+				01F000000000000000000014 /* DeterminismCheck.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000006 /* Keychain */ = {
+			isa = PBXGroup;
+			children = (
+				90CC10292FFD5BE1009F3881 /* SeedStore.swift */,
+				01F000000000000000000013 /* SeedBackup.swift */,
+			);
+			path = Keychain;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000007 /* State */ = {
+			isa = PBXGroup;
+			children = (
+				01F00000000000000000000A /* AppModel.swift */,
+			);
+			path = State;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000008 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				01F00000000000000000000D /* ContentView.swift */,
+				01F00000000000000000000E /* KeyDetailView.swift */,
+				01F000000000000000000017 /* OperationApprovalView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000009 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				904746D62FFD9EFE0033B1CE /* Passeport.icon */,
+				01F00000000000000000001C /* Media.xcassets */,
+				90CC10282FFD5897009F3881 /* Passeport.entitlements */,
+				01F00000000000000000000F /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		01F00300000000000000000A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				01F000000000000000000011 /* Passeport.app */,
+				01F000000000000000000023 /* PasseportTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000021 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				01F000000000000000000018 /* Hex.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000022 /* Tests/PasseportTests */ = {
+			isa = PBXGroup;
+			children = (
+				01F000000000000000000021 /* ClassificationTests.swift */,
+				01F000000000000000000022 /* GnuPGConfiguratorTests.swift */,
+			);
+			path = Tests/PasseportTests;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000023 /* Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				01F000000000000000000010 /* ScdBridge.swift */,
+			);
+			path = Bridge;
+			sourceTree = "<group>";
+		};
+		01F003000000000000000024 /* Integrations */ = {
+			isa = PBXGroup;
+			children = (
+				01F000000000000000000012 /* GnuPGConfigurator.swift */,
+				01F000000000000000000015 /* GitConfigurator.swift */,
+				01F000000000000000000016 /* LaunchAgentInstaller.swift */,
+			);
+			path = Integrations;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		01F004000000000000000001 /* Passeport */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 01F008000000000000000002 /* Build configuration list for PBXNativeTarget "Passeport" */;
+			buildPhases = (
+				01F006000000000000000001 /* Sources */,
+				01F002000000000000000001 /* Frameworks */,
+				01F00C000000000000000001 /* Resources */,
+				01F007000000000000000001 /* Build Rust Helper */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Passeport;
+			productName = Passeport;
+			productReference = 01F000000000000000000011 /* Passeport.app */;
+			productType = "com.apple.product-type.application";
+		};
+		01F004000000000000000002 /* PasseportTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 01F008000000000000000003 /* Build configuration list for PBXNativeTarget "PasseportTests" */;
+			buildPhases = (
+				01F006000000000000000002 /* Sources */,
+				01F002000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				01F00A000000000000000001 /* PBXTargetDependency */,
+			);
+			name = PasseportTests;
+			productName = PasseportTests;
+			productReference = 01F000000000000000000023 /* PasseportTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		01F005000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					01F004000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+				};
+			};
+			buildConfigurationList = 01F008000000000000000001 /* Build configuration list for PBXProject "Passeport" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 01F003000000000000000001;
+			productRefGroup = 01F00300000000000000000A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				01F004000000000000000001 /* Passeport */,
+				01F004000000000000000002 /* PasseportTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		01F007000000000000000001 /* Build Rust Helper */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Helper";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/passeport-core",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\nexport PATH=\"$HOME/.cargo/bin:$PATH\"\n\nif [ \"${CONFIGURATION}\" = \"Release\" ]; then\n  CARGO_PROFILE=release\n  CARGO_FLAGS=\"--release\"\nelse\n  CARGO_PROFILE=debug\n  CARGO_FLAGS=\"\"\nfi\n\ncargo build --manifest-path \"${SRCROOT}/crates/passeport-core/Cargo.toml\" ${CARGO_FLAGS}\n\nHELPER_SRC=\"${SRCROOT}/crates/passeport-core/target/${CARGO_PROFILE}/passeport-core\"\nHELPER_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers\"\nHELPER_DST=\"${HELPER_DIR}/passeport-core\"\n\nmkdir -p \"${HELPER_DIR}\"\ncp \"${HELPER_SRC}\" \"${HELPER_DST}\"\n\nif command -v xattr >/dev/null 2>&1; then\n  xattr -cr \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\" 2>/dev/null || true\nfi\n\nif [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ] && [ \"${CODE_SIGNING_ALLOWED:-YES}\" != \"NO\" ]; then\n  codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none \"${HELPER_DST}\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXResourcesBuildPhase section */
+		01F00C000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				01F00100000000000000001A /* Passeport.icon in Resources */,
+				01F00100000000000000001B /* Media.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		01F006000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				01F001000000000000000001 /* PasseportApp.swift in Sources */,
+				01F001000000000000000002 /* CoreClient.swift in Sources */,
+				01F001000000000000000003 /* CoreLocator.swift in Sources */,
+				01F001000000000000000004 /* DerivedIdentity.swift in Sources */,
+				01F001000000000000000005 /* PasseportError.swift in Sources */,
+				01F00100000000000000000A /* AppModel.swift in Sources */,
+				90CC102A2FFD5BE1009F3881 /* SeedStore.swift in Sources */,
+				01F001000000000000000010 /* ScdBridge.swift in Sources */,
+				01F001000000000000000012 /* GnuPGConfigurator.swift in Sources */,
+				01F001000000000000000013 /* SeedBackup.swift in Sources */,
+				01F001000000000000000014 /* DeterminismCheck.swift in Sources */,
+				01F001000000000000000015 /* GitConfigurator.swift in Sources */,
+				01F001000000000000000016 /* LaunchAgentInstaller.swift in Sources */,
+				01F00100000000000000000D /* ContentView.swift in Sources */,
+				01F00100000000000000000E /* KeyDetailView.swift in Sources */,
+				01F001000000000000000017 /* OperationApprovalView.swift in Sources */,
+				01F001000000000000000018 /* Hex.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		01F006000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				01F001000000000000000021 /* ClassificationTests.swift in Sources */,
+				01F001000000000000000022 /* GnuPGConfiguratorTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		01F00A000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 01F004000000000000000001 /* Passeport */;
+			targetProxy = 01F00B000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		01F009000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		01F009000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		01F009000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = Passeport;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = Resources/Passeport.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = XXM852QKZ8;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Passeport;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mchal.passeport;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		01F009000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = Passeport;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = Resources/Passeport.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = XXM852QKZ8;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Passeport;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mchal.passeport;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		01F009000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = XXM852QKZ8;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mchal.passeportTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Passeport.app/Contents/MacOS/Passeport";
+			};
+			name = Debug;
+		};
+		01F009000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = XXM852QKZ8;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mchal.passeportTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Passeport.app/Contents/MacOS/Passeport";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		01F008000000000000000001 /* Build configuration list for PBXProject "Passeport" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				01F009000000000000000001 /* Debug */,
+				01F009000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		01F008000000000000000002 /* Build configuration list for PBXNativeTarget "Passeport" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				01F009000000000000000003 /* Debug */,
+				01F009000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		01F008000000000000000003 /* Build configuration list for PBXNativeTarget "PasseportTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				01F009000000000000000005 /* Debug */,
+				01F009000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 01F005000000000000000001 /* Project object */;
+}

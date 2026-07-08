@@ -1,0 +1,5 @@
+.build/
+dist/
+crates/passeport-core/target/
+.DS_Store
+*.xcuserdata

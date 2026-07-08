@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust helper (fmt + clippy + test)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: crates/passeport-core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain components
+        run: rustup component add clippy rustfmt
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/passeport-core/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('crates/passeport-core/Cargo.lock') }}
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  swift:
+    name: Swift app (build + unit tests)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo (helper build phase)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/passeport-core/target
+          key: cargo-swiftci-${{ runner.os }}-${{ hashFiles('crates/passeport-core/Cargo.lock') }}
+      - name: Unit tests (unsigned)
+        # The pure-logic unit tests don't need a signed host app, so CI runs
+        # unsigned. The Rust helper build phase runs cargo (cached above).
+        run: |
+          xcodebuild test \
+            -project Passeport.xcodeproj \
+            -scheme Passeport \
+            -destination 'platform=macOS' \
+            -resultBundlePath TestResults \
+            CODE_SIGNING_ALLOWED=NO
