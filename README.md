@@ -21,10 +21,6 @@ generated private keys stay in memory unless you explicitly export them.
 > *not* a wallet's secp256k1 keys — the phrase format is interoperable, the
 > derived keys are not. Use a fresh Passeport phrase; don't reuse a wallet seed.
 
-> **History:** Passeport originally derived keys from an Apple Passwords passkey
-> (WebAuthn PRF), then briefly from an iCloud-synced seed. Both are gone; the
-> seed is now device-local with the recovery phrase as the portability story.
-
 ## Current Shape
 
 - SwiftUI app for the native macOS interface.
@@ -54,10 +50,8 @@ open Passeport.xcodeproj
 ```
 
 Select the `Passeport` scheme and press Run. The app needs no special
-entitlements or provisioning — the seed is stored device-local in the file
-keychain — so any signing works, including none. If Xcode complains about
-signing, set the team to *None* (or your personal team) under Signing &
-Capabilities; no Apple Developer account is required to build or run it.
+entitlements or provisioning; no Apple Developer account is required to build
+or run it.
 
 ## Packaging a release DMG
 
@@ -65,26 +59,6 @@ Capabilities; no Apple Developer account is required to build or run it.
 `dist/Passeport.dmg` (with a drag-to-`/Applications` symlink).
 
 ```sh
-# Ad-hoc build — fully functional (device-local seed needs no entitlement),
-# no Apple account required. Gatekeeper warns on first launch; users
-# right-click → Open once. Fine for a free GitHub release.
-scripts/make-dmg.sh
-```
-
-To drop the Gatekeeper warning, sign with a **Developer ID Application**
-certificate (paid Apple Developer Program) and notarize. The app *works* either
-way — signing only removes the first-launch prompt. It is not eligible for the
-Mac App Store, because the sandbox forbids running `gpg`, writing `~/.gnupg`,
-and installing LaunchAgents.
-
-```sh
-# One-time: store notarization credentials in the keychain.
-xcrun notarytool store-credentials passeport-notary \
-  --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
-
-# Signed + hardened-runtime + notarized + stapled DMG.
-SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-NOTARY_PROFILE="passeport-notary" \
 scripts/make-dmg.sh
 ```
 
@@ -94,8 +68,11 @@ Then attach the DMG to a GitHub release:
 gh release create v0.1.0 dist/Passeport.dmg --title "Passeport 0.1.0" --notes "…"
 ```
 
-Users download the DMG, drag Passeport to Applications, and — for a
-notarized build — launch it with no Gatekeeper friction.
+The script also supports signing and notarizing via the `SIGN_IDENTITY` and
+`NOTARY_PROFILE` environment variables (see the header of
+[scripts/make-dmg.sh](scripts/make-dmg.sh)); an unsigned build is fully
+functional but shows a Gatekeeper warning on first launch (right-click →
+Open once).
 
 ## Security Model
 

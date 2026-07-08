@@ -8,9 +8,9 @@ This file defines the compatibility contract for keys derived from the root
 seed. Changing any existing salt, label, timestamp, or key encoding creates a
 new contract version.
 
-Label strings are frozen identifiers; some predate the switch away from
-passkeys ("passeport-passkey-v1" et al.) and are kept verbatim because
-renaming them would change every derived key.
+Label strings are frozen identifiers: they are opaque protocol constants, not
+descriptions of the current design, and are kept verbatim because renaming
+them would change every derived key.
 
 ## Input
 
@@ -19,7 +19,7 @@ generic-password item in the file-based (login) keychain (service
 `passeport.seed`, account `default`). It is not synchronizable and never leaves
 the machine; the portable form is its 24-word BIP39 encoding (the seed *is* the
 mnemonic entropy — see Recovery phrase below). The root input keying material
-is a PRF emulation:
+is derived from it:
 
 ```text
 root = HMAC-SHA256(key = seed, data = "passeport root v1")
@@ -114,5 +114,5 @@ The daemon delegates every private operation to a `CryptoBackend`:
 - `PASSEPORT_SCD_PRF=<base64url>` — development. The shim derives in-process.
 
 The socket protocol and the `op` subcommand share one request/response schema
-(see `src/ops.rs`), so the app is a thin PRF-injecting relay in front of the
-same crypto the dev backend runs.
+(see `src/ops.rs`), so the app is a thin root-secret-injecting relay in front
+of the same crypto the dev backend runs.
