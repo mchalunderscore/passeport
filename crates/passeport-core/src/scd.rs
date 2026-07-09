@@ -299,6 +299,25 @@ impl Card {
             .expect("all three slots exist")
     }
 
+    /// Confirm the live backend still serves the key this card model
+    /// advertises for `role`. The model is a snapshot from startup, and the
+    /// identity can change underneath it (seed reset/restore in the app);
+    /// signing with a different key than the agent was promised produces
+    /// signatures that can never verify.
+    fn slot_is_current(&self, role: SlotRole) -> Result<()> {
+        let snapshot = self.slot(role);
+        let fresh = self.backend.slots()?;
+        let live = fresh
+            .iter()
+            .find(|public| public.keyref == snapshot.keyref());
+        match live {
+            Some(public) if public.q == snapshot.q => Ok(()),
+            _ => bail!(
+                "card identity changed since gpg-agent started; run `gpgconf --kill all` to reload"
+            ),
+        }
+    }
+
     fn find(&self, spec: &str) -> Option<&Slot> {
         let upper = spec.to_ascii_uppercase();
         self.slots.iter().find(|slot| {
@@ -667,10 +686,16 @@ impl<W: Write> Session<'_, W> {
             .split_whitespace()
             .find(|word| !word.starts_with("--"))
             .unwrap_or("");
-        // Route to the auth slot if its grip was named, else the sign slot.
-        let role = match self.card.find(spec) {
-            Some(slot) if matches!(slot.role, SlotRole::Auth) => SlotRole::Auth,
-            _ => SlotRole::Sign,
+        // A named key must exist on this card; silently falling back to the
+        // sign slot would produce a signature by a key the agent never asked
+        // for. No argument means the default sign slot.
+        let role = if spec.is_empty() {
+            SlotRole::Sign
+        } else {
+            match self.card.find(spec) {
+                Some(slot) => slot.role,
+                None => return self.err(ERR_NO_SECKEY, "No such key on this card"),
+            }
         };
         self.sign_with(role)
     }
@@ -682,6 +707,9 @@ impl<W: Write> Session<'_, W> {
     fn sign_with(&mut self, role: SlotRole) -> Result<()> {
         if self.data.is_empty() {
             return self.err(ERR_INV_DATA, "No data to sign (SETDATA first)");
+        }
+        if let Err(error) = self.card.slot_is_current(role) {
+            return self.err(ERR_NO_SECKEY, &format!("{error:#}"));
         }
         let keyref = self.card.slot(role).keyref();
         let message = strip_digestinfo(&self.data).to_vec();
@@ -702,6 +730,9 @@ impl<W: Write> Session<'_, W> {
             32 => self.data.clone(),
             _ => return self.err(ERR_INV_DATA, "Unexpected ECDH input length"),
         };
+        if let Err(error) = self.card.slot_is_current(SlotRole::Decrypt) {
+            return self.err(ERR_NO_SECKEY, &format!("{error:#}"));
+        }
         let keyref = self.card.slot(SlotRole::Decrypt).keyref();
         match self.card.backend.ecdh(keyref, &point) {
             Ok(shared) => {
@@ -870,6 +901,40 @@ mod tests {
 
     fn slot_q(card: &Card, role: SlotRole) -> Vec<u8> {
         card.slot(role).q.clone()
+    }
+
+    #[test]
+    fn pksign_unknown_key_errors_instead_of_falling_back() {
+        let card = test_card();
+        let commands = format!(
+            "SETDATA {}\nPKSIGN {}\nBYE\n",
+            hex::encode([0xABu8; 32]),
+            "0000000000000000000000000000000000000000"
+        );
+        let reply = text(&talk(&card, &commands));
+        assert!(reply.contains("No such key"), "got: {reply}");
+        assert!(!reply.contains("\nD "), "must not return a signature");
+    }
+
+    #[test]
+    fn sign_refuses_when_card_identity_changed_under_the_model() {
+        // Build the model from one identity, then swap the backend to a
+        // different one — as happens when the seed is reset/restored while
+        // gpg-agent keeps its shim alive.
+        let mut card = test_card();
+        let other_prf = [9u8; 32];
+        let other_seed = identity::derive_pgp_seed(&other_prf).unwrap();
+        card.backend = Box::new(LocalBackend {
+            seed: other_seed,
+            user_id: "Passeport Test <test@example.invalid>".to_owned(),
+        });
+        let commands = format!(
+            "SETDATA {}\nPKSIGN OPENPGP.1\nBYE\n",
+            hex::encode([0xABu8; 32])
+        );
+        let reply = text(&talk(&card, &commands));
+        assert!(reply.contains("identity changed"), "got: {reply}");
+        assert!(!reply.contains("\nD "), "must not return a signature");
     }
 
     #[test]

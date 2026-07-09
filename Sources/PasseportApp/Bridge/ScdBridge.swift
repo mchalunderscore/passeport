@@ -163,33 +163,36 @@ final class ScdBridge {
     private func handle(client: Int32) async {
         defer { close(client) }
         guard let requestLine = Self.readLine(fd: client) else { return }
-        let parsed = OperationRequestMetadata.parse(requestLine: requestLine)
-        guard let parsed else {
-            Self.writeAll(fd: client, string: Self.errorJSON("invalid operation request") + "\n")
-            return
-        }
-        if parsed.kind == .unknown {
-            let operation = parsed.kind.rawValue
-            let keyref = parsed.keyref
-            let clientID = parsed.requestingClient
-            await logAuditEvent(
-                kind: operation,
-                keyref: keyref,
-                requestingClient: clientID,
-                byteCount: parsed.byteCount,
-                summary: parsed.summary,
-                outcome: "failed",
-                detail: "unsupported operation"
-            )
-            Self.writeAll(fd: client, string: Self.errorJSON("unsupported operation") + "\n")
-            return
-        }
+        let responseLine = await process(requestLine: requestLine)
+        Self.writeAll(fd: client, string: responseLine + "\n")
+    }
 
+    /// Run one private-operation request through the full pipeline —
+    /// approval prompt, Touch ID policy, helper invocation, audit log — and
+    /// return the response line. Shared by the scd socket and the native
+    /// SSH agent, so every key use funnels through the same controls.
+    func process(requestLine: String) async -> String {
+        guard let parsed = OperationRequestMetadata.parse(requestLine: requestLine) else {
+            return Self.errorJSON("invalid operation request")
+        }
         let operation = parsed.kind.rawValue
         let keyref = parsed.keyref
         let clientID = parsed.requestingClient
         let byteCount = parsed.byteCount
         let summary = parsed.summary
+
+        if parsed.kind == .unknown {
+            await logAuditEvent(
+                kind: operation,
+                keyref: keyref,
+                requestingClient: clientID,
+                byteCount: byteCount,
+                summary: summary,
+                outcome: "failed",
+                detail: "unsupported operation"
+            )
+            return Self.errorJSON("unsupported operation")
+        }
 
         // Public card metadata is not secret: serve it from the cache without
         // unlocking the seed or asking for approval, so routine gpg lookups
@@ -204,8 +207,7 @@ final class ScdBridge {
                 outcome: "succeeded",
                 detail: "served from public key cache without unlocking the seed"
             )
-            Self.writeAll(fd: client, string: cached + "\n")
-            return
+            return cached
         }
 
         let responseLine: String
@@ -222,8 +224,7 @@ final class ScdBridge {
                         outcome: "denied",
                         detail: "user denied confirmation prompt"
                     )
-                    Self.writeAll(fd: client, string: Self.errorJSON("operation denied by user") + "\n")
-                    return
+                    return Self.errorJSON("operation denied by user")
                 }
             }
             if requireTouchIDPerOperation, parsed.kind.requiresFreshSeedAuthorization {
@@ -255,7 +256,7 @@ final class ScdBridge {
             )
             responseLine = Self.errorJSON(error.localizedDescription)
         }
-        Self.writeAll(fd: client, string: responseLine + "\n")
+        return responseLine
     }
 
     private func logAuditEvent(

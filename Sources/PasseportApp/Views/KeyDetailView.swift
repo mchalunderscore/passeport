@@ -36,6 +36,9 @@ private struct PublicKeySection: View {
                     ActionButton(label: "Copy SSH", systemImage: "doc.on.doc") {
                         app.copy(identity.ssh.publicKey, label: "SSH public key")
                     },
+                    ActionButton(label: "Copy age", systemImage: "doc.on.doc") {
+                        app.copy(identity.age.recipient, label: "age recipient")
+                    },
                     ActionButton(label: "Export", systemImage: "square.and.arrow.down") {
                         app.exportPublicBundle()
                     }
@@ -43,8 +46,8 @@ private struct PublicKeySection: View {
             )
 
             KeyField(title: "SSH public key (OpenPGP auth subkey)", value: identity.ssh.publicKey)
-            KeyField(title: "OpenPGP fingerprint", value: identity.pgp.fingerprint)
             KeyField(title: "OpenPGP public key", value: identity.pgp.publicKey, minHeight: 180)
+            KeyField(title: "age recipient (OpenPGP encryption subkey)", value: identity.age.recipient)
         }
     }
 }

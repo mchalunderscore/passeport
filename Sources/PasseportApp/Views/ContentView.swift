@@ -41,6 +41,10 @@ struct ContentView: View {
                     ContractWarningBanner(message: warning)
                         .padding([.horizontal, .top], 20)
                 }
+                if let warning = app.gnupgStubWarning {
+                    ContractWarningBanner(message: warning)
+                        .padding([.horizontal, .top], 20)
+                }
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 StatusBar()
@@ -369,17 +373,74 @@ private struct IntegrationsSection: View {
 
                 GroupBox {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Sign git commits and tags with your OpenPGP key, using the same gpg the bridge configures.")
+                        if app.sshAgentRunning {
+                            Label("Agent running — ssh can use your auth key directly", systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                        } else {
+                            Label("Agent stopped", systemImage: "pause.circle")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text("A built-in ssh-agent serving your auth key — no GnuPG needed. “Configure SSH” points ~/.ssh/config at it; every signature still asks for approval per your settings.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Button {
-                            app.configureGitSigning()
-                        } label: {
-                            Label("Set Up Git Commit Signing", systemImage: "checkmark.seal")
+
+                        HStack {
+                            Button {
+                                app.toggleSSHAgent()
+                            } label: {
+                                Label(app.sshAgentRunning ? "Stop Agent" : "Start Agent",
+                                      systemImage: app.sshAgentRunning ? "stop.circle" : "play.circle")
+                            }
+                            .disabled(app.isBusy)
+
+                            Button {
+                                app.configureSSH()
+                            } label: {
+                                Label("Configure SSH", systemImage: "gearshape")
+                            }
+                            .disabled(app.isBusy)
+
+                            Button {
+                                if let key = app.identity?.ssh.publicKey {
+                                    app.copy(key, label: "SSH public key")
+                                }
+                            } label: {
+                                Label("Copy Public Key", systemImage: "doc.on.doc")
+                            }
+                            .disabled(app.identity == nil)
+                            .help(app.identity == nil ? "Derive your keys first to enable this." : "Copy the SSH public key for GitHub and authorized_keys.")
                         }
-                        .disabled(app.isBusy || app.identity == nil)
-                        .help(app.identity == nil ? "Derive your keys first to enable this." : "Configure git to sign commits and tags with your key.")
+                    }
+                    .padding(6)
+                } label: {
+                    Label("Native SSH Agent", systemImage: "terminal")
+                }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Sign git commits and tags with your Passeport identity. Choose GPG (OpenPGP signatures via gpg) or SSH (signed through the native agent, no GnuPG needed). Both show as Verified on GitHub.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            Button {
+                                app.configureGitSigning()
+                            } label: {
+                                Label("Set Up Git Signing (GPG)", systemImage: "checkmark.seal")
+                            }
+                            .disabled(app.isBusy || app.identity == nil)
+                            .help(app.identity == nil ? "Derive your keys first to enable this." : "Configure git to sign with your OpenPGP key via gpg.")
+
+                            Button {
+                                app.configureGitSigningSSH()
+                            } label: {
+                                Label("Set Up Git Signing (SSH)", systemImage: "terminal")
+                            }
+                            .disabled(app.isBusy || app.identity == nil)
+                            .help(app.identity == nil ? "Derive your keys first to enable this." : "Configure git to sign with SSH (gpg.format=ssh), signed through the native agent.")
+                        }
                         if app.identity == nil {
                             RequiresKeysHint()
                         }
@@ -387,6 +448,46 @@ private struct IntegrationsSection: View {
                     .padding(6)
                 } label: {
                     Label("Git", systemImage: "arrow.triangle.branch")
+                }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Encrypt and decrypt files with age — no GnuPG needed. Passeport installs an age plugin; decryption is Touch ID-gated through the app. Files encrypted with age are not interoperable with gpg encryption.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            Button {
+                                app.configureAge()
+                            } label: {
+                                Label("Set Up age Encryption", systemImage: "lock.doc")
+                            }
+                            .disabled(app.isBusy || app.identity == nil)
+                            .help(app.identity == nil ? "Derive your keys first to enable this." : "Install age-plugin-passeport and show your recipient.")
+
+                            if let recipient = app.ageRecipient {
+                                Button {
+                                    app.copy(recipient, label: "age recipient")
+                                } label: {
+                                    Label("Copy Recipient", systemImage: "doc.on.doc")
+                                }
+                            }
+                        }
+                        if let recipient = app.ageRecipient {
+                            Text(recipient)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        if app.identity == nil {
+                            RequiresKeysHint()
+                        }
+                    }
+                    .padding(6)
+                } label: {
+                    Label("age Encryption", systemImage: "lock.doc")
                 }
                 Spacer(minLength: 0)
             }

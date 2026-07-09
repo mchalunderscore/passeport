@@ -146,6 +146,40 @@ enum GnuPGConfigurator {
         try locateTool("gpg").path
     }
 
+    /// Passeport's OpenPGP card AID prefix (RID + app + version + the 0xFFFE
+    /// test-range manufacturer), as it appears in gpg's stub serial numbers.
+    private static let cardSerialPrefix = "D276000124010304FFFE"
+
+    /// True when gpg holds card stubs for a Passeport card but none of them
+    /// match the current identity — the stubs reference an older seed and
+    /// "Configure GnuPG" needs to be re-run. False when gpg is missing or has
+    /// no Passeport stubs at all (nothing configured, nothing stale).
+    static func hasStaleCardStubs(currentFingerprint: String) -> Bool {
+        guard let gpg = try? locateTool("gpg"),
+              let output = try? run(gpg, ["-K", "--with-colons"], home: gnupgHome()) else {
+            return false
+        }
+        var passeportPrimaryFingerprints: [String] = []
+        var awaitingFingerprint = false
+        for line in output.split(separator: "\n") {
+            let fields = line.components(separatedBy: ":")
+            guard let record = fields.first else { continue }
+            switch record {
+            case "sec":
+                awaitingFingerprint = fields.count > 14 && fields[14].hasPrefix(cardSerialPrefix)
+            case "fpr" where awaitingFingerprint:
+                if fields.count > 9 {
+                    passeportPrimaryFingerprints.append(fields[9].uppercased())
+                }
+                awaitingFingerprint = false
+            default:
+                break
+            }
+        }
+        guard !passeportPrimaryFingerprints.isEmpty else { return false }
+        return !passeportPrimaryFingerprints.contains(currentFingerprint.uppercased())
+    }
+
     // MARK: - User-ID pruning
 
     private struct KeyInfo {

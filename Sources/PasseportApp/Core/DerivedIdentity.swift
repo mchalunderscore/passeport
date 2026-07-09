@@ -3,6 +3,7 @@ import Foundation
 struct DerivedIdentity: Decodable, Equatable {
     let ssh: SSHIdentity
     let pgp: PGPIdentity
+    let age: AgeIdentity
 }
 
 struct SSHIdentity: Decodable, Equatable {
@@ -11,6 +12,10 @@ struct SSHIdentity: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case publicKey = "public_key"
     }
+}
+
+struct AgeIdentity: Decodable, Equatable {
+    let recipient: String
 }
 
 struct PGPIdentity: Decodable, Equatable {
@@ -38,6 +43,9 @@ extension DerivedIdentity {
 
         ## OpenPGP public key
         \(pgp.publicKey)
+
+        ## age recipient (OpenPGP encryption subkey)
+        \(age.recipient)
         """
     }
 

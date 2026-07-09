@@ -1,5 +1,7 @@
 mod identity;
 mod ops;
+mod age;
+mod age_plugin;
 mod scd;
 
 use std::io::{self, Read};
@@ -13,7 +15,9 @@ use ssh_key::PublicKey;
 use ssh_key::public::{Ed25519PublicKey, KeyData};
 use zeroize::Zeroizing;
 
-use identity::{auth_subkey_public, decode_prf, derive_pgp_seed, generate_signed_key};
+use identity::{
+    auth_subkey_public, decode_prf, derive_pgp_seed, encryption_subkey_public, generate_signed_key,
+};
 
 #[derive(Debug, Deserialize)]
 struct DeriveRequest {
@@ -26,11 +30,17 @@ struct DeriveRequest {
 struct DeriveResponse {
     ssh: SshOutput,
     pgp: PgpOutput,
+    age: AgeOutput,
 }
 
 #[derive(Debug, Serialize)]
 struct SshOutput {
     public_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AgeOutput {
+    recipient: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,6 +51,17 @@ struct PgpOutput {
 }
 
 fn main() {
+    // age invokes the plugin as `age-plugin-passeport --age-plugin=<state>`.
+    // We ship that name as a symlink to this binary, so dispatch on the flag.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(state) = args.iter().find_map(|a| a.strip_prefix("--age-plugin=")) {
+        if let Err(error) = age_plugin::run(state) {
+            eprintln!("{error:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let mode = std::env::args().nth(1);
     let result = match mode.as_deref() {
         Some("scd") => scd::serve(),
@@ -49,6 +70,7 @@ fn main() {
         Some("mnemonic-decode") => run_mnemonic_decode(),
         Some("revoke") => run_revoke(),
         Some("selftest") => run_selftest(),
+        Some("age-recipient") => run_age_recipient(),
         None => run(),
         Some(other) => Err(anyhow::anyhow!("unknown mode: {other}")),
     };
@@ -95,6 +117,9 @@ fn derive_response(request: &DeriveRequest) -> Result<DeriveResponse> {
         request.ssh_comment.as_deref().unwrap_or("passeport"),
     );
 
+    // The age recipient is the encryption subkey's X25519 public key.
+    let age_recipient = age::encode_recipient(&encryption_subkey_public(&signed_key)?)?;
+
     Ok(DeriveResponse {
         ssh: SshOutput {
             public_key: ssh_public
@@ -106,7 +131,30 @@ fn derive_response(request: &DeriveRequest) -> Result<DeriveResponse> {
             public_key: public_armored,
             secret_key: secret_armored,
         },
+        age: AgeOutput {
+            recipient: age_recipient,
+        },
     })
+}
+
+/// `age-recipient`: read the encryption subkey's 32-byte X25519 public key as
+/// hex from stdin, print `{recipient, identity}` for age. No seed access — the
+/// app pipes the public point from its card cache.
+fn run_age_recipient() -> Result<()> {
+    let mut input = String::new();
+    io::stdin()
+        .read_to_string(&mut input)
+        .context("failed to read public key from stdin")?;
+    let bytes = hex::decode(input.trim()).context("public key must be hex")?;
+    let public_key: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("public key must be 32 bytes"))?;
+    let response = serde_json::json!({
+        "recipient": age::encode_recipient(&public_key)?,
+        "identity": age::encode_identity(&public_key)?,
+    });
+    println!("{}", serde_json::to_string(&response)?);
+    Ok(())
 }
 
 fn pgp_fingerprint(armored_pubkey: &str) -> Result<String> {

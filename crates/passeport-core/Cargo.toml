@@ -26,3 +26,5 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 ssh-key = { version = "0.6", features = ["ed25519"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
 bip39 = { version = "2.2.2", default-features = false, features = ["std"] }
+bech32 = "0.11"
+chacha20poly1305 = "0.10"

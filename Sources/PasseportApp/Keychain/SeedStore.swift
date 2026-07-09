@@ -53,13 +53,22 @@ enum SeedStore {
         true
     }
 
+    /// The secure seed carries a `.userPresence` access-control and therefore
+    /// lives in the data-protection keychain; every query touching it must opt
+    /// in, or it silently searches the legacy keychain and finds nothing. The
+    /// legacy plain-text seed (migration only) predates that and stays in the
+    /// legacy keychain.
+    private nonisolated static func usesDataProtection(_ service: String) -> Bool {
+        service == secureService
+    }
+
     private nonisolated static func hasSeedInKeychain(service: String) -> Bool {
         // Matching a user-presence-protected item pops the auth prompt even
         // when no data is requested; an existence check must forbid
         // interaction and treat "auth required" as "item present" instead.
         let context = LAContext()
         context.interactionNotAllowed = true
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account,
@@ -67,15 +76,16 @@ enum SeedStore {
             kSecReturnData: kCFBooleanFalse as CFBoolean,
             kSecUseAuthenticationContext: context,
         ]
+        if usesDataProtection(service) {
+            query[kSecUseDataProtectionKeychain] = kCFBooleanTrue
+        }
 
         let status = SecItemCopyMatching(query as CFDictionary, nil)
         switch status {
-        case errSecSuccess:
+        case errSecSuccess, errSecInteractionNotAllowed:
+            // Both mean the item is present: success when no auth is needed,
+            // interaction-not-allowed when the presence gate would prompt.
             return true
-        case errSecInteractionNotAllowed:
-            return service == secureService
-        case errSecItemNotFound:
-            return false
         default:
             return false
         }
@@ -90,6 +100,7 @@ enum SeedStore {
             kSecMatchLimit: kSecMatchLimitOne,
         ]
         if service == secureService {
+            query[kSecUseDataProtectionKeychain] = kCFBooleanTrue
             if let authenticationContext {
                 query[kSecUseAuthenticationContext] = authenticationContext
             } else {
@@ -127,11 +138,14 @@ enum SeedStore {
     static func deleteSeed() throws {
         cachedSeed = nil
         for keychainService in [secureService, service] {
-            let query: [CFString: Any] = [
+            var query: [CFString: Any] = [
                 kSecClass: kSecClassGenericPassword,
                 kSecAttrService: keychainService,
                 kSecAttrAccount: account,
             ]
+            if usesDataProtection(keychainService) {
+                query[kSecUseDataProtectionKeychain] = kCFBooleanTrue
+            }
             let status = SecItemDelete(query as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else {
                 throw keychainError(from: status)
@@ -253,6 +267,7 @@ enum SeedStore {
             kSecAttrAccount: account,
             kSecAttrAccessControl: access,
             kSecValueData: seed,
+            kSecUseDataProtectionKeychain: kCFBooleanTrue as CFBoolean,
         ]
         try writeSeed(attrs: attrs)
     }
@@ -271,12 +286,15 @@ enum SeedStore {
     private nonisolated static func writeSeed(attrs: [CFString: Any]) throws {
         let status = SecItemAdd(attrs as CFDictionary, nil)
         if status == errSecDuplicateItem {
-            let service = attrs[kSecAttrService] ?? secureService
-            let query: [CFString: Any] = [
+            let service = (attrs[kSecAttrService] as? String) ?? secureService
+            var query: [CFString: Any] = [
                 kSecClass: kSecClassGenericPassword,
                 kSecAttrService: service,
                 kSecAttrAccount: account,
             ]
+            if usesDataProtection(service) {
+                query[kSecUseDataProtectionKeychain] = kCFBooleanTrue
+            }
             let update: [CFString: Any] = [kSecValueData: attrs[kSecValueData] as Any]
             let upStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
             guard upStatus == errSecSuccess else {

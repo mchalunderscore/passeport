@@ -44,9 +44,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var isBusy = false
     @Published var showingPrivateMaterial = false
     @Published private(set) var bridgeRunning = false
+    @Published private(set) var sshAgentRunning = false
+    @Published private(set) var ageRecipient: String?
     @Published var backgroundLauncherInstalled = LaunchAgentInstaller.isInstalled
     @Published var recoveryPhrase: String?
     @Published private(set) var contractWarning: String?
+    @Published private(set) var gnupgStubWarning: String?
     @Published var launchAtLogin: Bool {
         didSet { applyLaunchAtLogin() }
     }
@@ -278,6 +281,22 @@ final class AppModel: ObservableObject {
         // The seed is unlocked anyway; refresh the public-card cache so gpg
         // lookups won't need Touch ID later.
         await ScdBridge.refreshPublicCardCache(prf: prf, userID: userID)
+        refreshGnuPGStubWarning()
+    }
+
+    /// Warn when gpg's card stubs reference an older Passeport identity —
+    /// the exact mismatch that makes ssh/gpg silently fail after a seed
+    /// reset or restore.
+    private func refreshGnuPGStubWarning() {
+        guard let fingerprint = identity?.pgp.fingerprint else { return }
+        Task.detached(priority: .utility) {
+            let stale = GnuPGConfigurator.hasStaleCardStubs(currentFingerprint: fingerprint)
+            await MainActor.run {
+                self.gnupgStubWarning = stale
+                    ? "GnuPG references an older Passeport identity — run “Configure GnuPG” to update its key stubs."
+                    : nil
+            }
+        }
     }
 
     func resetSeed() {
@@ -309,10 +328,20 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Bring the socket up on launch so gpg works whenever the app runs.
-    /// Only binds the socket; no seed access until gpg requests an operation.
+    /// Bring the sockets up on launch so gpg and ssh work whenever the app
+    /// runs. Only binds sockets; no seed access until an operation arrives.
     func startBridgeIfNeeded() {
         Task { @MainActor in
+            if await SSHAgentServer.shared.isRunning {
+                self.sshAgentRunning = true
+            } else {
+                do {
+                    try await SSHAgentServer.shared.start()
+                    self.sshAgentRunning = true
+                } catch {
+                    self.status = error.localizedDescription
+                }
+            }
             guard !(await ScdBridge.shared.isRunning) else {
                 self.bridgeRunning = true
                 return
@@ -323,6 +352,63 @@ final class AppModel: ObservableObject {
             } catch {
                 self.status = error.localizedDescription
             }
+        }
+    }
+
+    func toggleSSHAgent() {
+        runBusy(sshAgentRunning ? "Stopping SSH agent" : "Starting SSH agent") { [self] in
+            if await SSHAgentServer.shared.isRunning {
+                await SSHAgentServer.shared.stop()
+                self.sshAgentRunning = false
+                self.status = "SSH agent stopped"
+            } else {
+                try await SSHAgentServer.shared.start()
+                self.sshAgentRunning = true
+                self.status = "SSH agent running"
+            }
+        }
+    }
+
+    /// Install `age-plugin-passeport` and surface the age recipient. Requires
+    /// the encryption key to be available (derive keys first).
+    func configureAge() {
+        guard identity != nil else {
+            status = "Derive keys first, then set up age"
+            return
+        }
+        runBusy("Configuring age encryption") { [self] in
+            // The plugin decrypts through the bridge, so make sure it is up.
+            if !(await ScdBridge.shared.isRunning) {
+                try await ScdBridge.shared.start()
+                self.bridgeRunning = true
+            }
+            guard let publicKeyHex = PublicCardCache.encryptionPublicKeyHex() else {
+                throw AgeConfigurator.AgeError.noEncryptionKey
+            }
+            let helperPath = try CoreLocator.helperURL().path
+            let socketPath = ScdBridge.socketURL.path
+            let result: AgeConfigurator.Result = try await Task.detached(priority: .userInitiated) {
+                try AgeConfigurator.configure(
+                    encryptionPublicKeyHex: publicKeyHex,
+                    helperPath: helperPath,
+                    socketPath: socketPath
+                )
+            }.value
+            self.ageRecipient = result.recipient
+            self.status = "age ready — add \(result.binDirectory) to PATH, then `age -r \(result.recipient)`"
+        }
+    }
+
+    /// Point ~/.ssh/config at the native agent (IdentityAgent), starting the
+    /// agent first if needed.
+    func configureSSH() {
+        runBusy("Configuring SSH") { [self] in
+            if !(await SSHAgentServer.shared.isRunning) {
+                try await SSHAgentServer.shared.start()
+                self.sshAgentRunning = true
+            }
+            let result = try SSHConfigurator.configure(socketPath: SSHAgentServer.socketURL.path)
+            self.status = "SSH configured — ssh now uses the Passeport agent via \(result.configPath)"
         }
     }
 
@@ -379,6 +465,7 @@ final class AppModel: ObservableObject {
                 )
             }.value
             self.status = "GnuPG configured. For SSH: export SSH_AUTH_SOCK=\(result.sshAuthSock)"
+            self.refreshGnuPGStubWarning()
         }
     }
 
@@ -473,6 +560,27 @@ final class AppModel: ObservableObject {
             await MainActor.run {
                 self.status = "git will now sign commits with \(result.signingKey.suffix(16))"
             }
+        }
+    }
+
+    /// Configure git to sign with SSH (`gpg.format=ssh`), signed through the
+    /// native agent. Starts the agent if needed so signing works right away.
+    func configureGitSigningSSH() {
+        guard let identity else {
+            status = "Derive keys first, then set up git signing"
+            return
+        }
+        let publicKey = identity.ssh.publicKey
+        runBusy("Configuring git SSH signing") { [self] in
+            if !(await SSHAgentServer.shared.isRunning) {
+                try await SSHAgentServer.shared.start()
+                self.sshAgentRunning = true
+            }
+            let socketPath = SSHAgentServer.socketURL.path
+            let result: GitConfigurator.SSHSigningResult = try await Task.detached(priority: .userInitiated) {
+                try GitConfigurator.configureSSHSigning(publicKey: publicKey, sshAuthSock: socketPath)
+            }.value
+            self.status = "git will sign commits with SSH — ensure SSH_AUTH_SOCK=\(result.sshAuthSock)"
         }
     }
 

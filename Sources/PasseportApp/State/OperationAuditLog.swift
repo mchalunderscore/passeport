@@ -31,7 +31,7 @@ actor OperationAuditLog {
 
     func events(limit: Int = maxEntries) async -> [OperationAuditEvent] {
         if cached.isEmpty {
-            cached = (try? load()) ?? []
+            cached = loadOrQuarantine()
         }
         return Array(cached.prefix(limit))
     }
@@ -39,7 +39,7 @@ actor OperationAuditLog {
     func append(event: OperationAuditEvent) async {
         var current = cached
         if current.isEmpty {
-            current = (try? load()) ?? []
+            current = loadOrQuarantine()
         }
         current.insert(event, at: 0)
         if current.count > Self.maxEntries {
@@ -56,10 +56,21 @@ actor OperationAuditLog {
         await notifyChanged()
     }
 
-    private func load() throws -> [OperationAuditEvent] {
-        let data = try Data(contentsOf: Self.fileURL)
-        let decoded = try JSONDecoder().decode([OperationAuditEvent].self, from: data)
-        return decoded
+    /// Read the log from disk. A missing file is a fresh log; an unreadable
+    /// one is moved aside instead of being silently overwritten by the next
+    /// append — this is an audit trail, losing it should leave a trace.
+    private func loadOrQuarantine() -> [OperationAuditEvent] {
+        guard let data = try? Data(contentsOf: Self.fileURL) else {
+            return []
+        }
+        do {
+            return try JSONDecoder().decode([OperationAuditEvent].self, from: data)
+        } catch {
+            let quarantine = Self.fileURL.appendingPathExtension("corrupt")
+            try? FileManager.default.removeItem(at: quarantine)
+            try? FileManager.default.moveItem(at: Self.fileURL, to: quarantine)
+            return []
+        }
     }
 
     private func save(_ events: [OperationAuditEvent]) throws {

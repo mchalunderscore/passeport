@@ -284,6 +284,28 @@ fn revocation_signature(
 }
 
 /// Raw 32-byte Ed25519 public key of the authentication subkey.
+/// The X25519 public key of the encryption (ECDH) subkey — the material an
+/// age recipient/identity encodes.
+pub fn encryption_subkey_public(key: &pgp::SignedSecretKey) -> Result<[u8; 32]> {
+    let enc = key
+        .secret_subkeys
+        .iter()
+        .find(|subkey| matches!(subkey.key.public_params(), PublicParams::ECDH(_)))
+        .context("generated pgp key has no ecdh encryption subkey")?;
+
+    let PublicParams::ECDH(EcdhPublicParams::Known { p, .. }) = enc.key.public_params() else {
+        bail!("unexpected ecdh public key encoding");
+    };
+    // p is the compressed point: 0x40 prefix + 32-byte X25519 key.
+    let p = p.as_bytes();
+    if p.len() != 33 || p[0] != 0x40 {
+        bail!("unexpected ecdh public key encoding");
+    }
+    let mut raw = [0u8; 32];
+    raw.copy_from_slice(&p[1..]);
+    Ok(raw)
+}
+
 pub fn auth_subkey_public(key: &pgp::SignedSecretKey) -> Result<[u8; 32]> {
     let auth = key
         .secret_subkeys
