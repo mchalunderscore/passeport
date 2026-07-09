@@ -9,10 +9,14 @@
   <string>lol.mchal.passeport</string>
   <key>CFBundleName</key>
   <string>Passeport</string>
-  <key>CFBundleDisplayName</key>
-  <string>Passeport</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
+	<key>CFBundleDisplayName</key>
+	<string>Passeport</string>
+	<key>CFBundleIconFile</key>
+	<string>Passeport</string>
+	<key>CFBundleIconName</key>
+	<string>Passeport</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
   <key>CFBundleShortVersionString</key>
   <string>0.1.0</string>
   <key>CFBundleVersion</key>

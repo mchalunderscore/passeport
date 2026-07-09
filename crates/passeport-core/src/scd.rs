@@ -69,6 +69,19 @@ struct LocalBackend {
 }
 
 impl LocalBackend {
+    fn client_name() -> &'static str {
+        "passeport-scd local"
+    }
+
+    fn request_comment(op: &str) -> &'static str {
+        match op {
+            "pubkeys" => "public card metadata",
+            "sign" => "openpgp signature",
+            "ecdh" => "ecdh session key exchange",
+            _ => "private card operation",
+        }
+    }
+
     fn call(&self, request: &Request) -> Result<Response> {
         ops::handle(&self.seed, &self.user_id, request)
     }
@@ -76,7 +89,10 @@ impl LocalBackend {
 
 impl CryptoBackend for LocalBackend {
     fn slots(&self) -> Result<Vec<SlotPublic>> {
-        match self.call(&Request::Pubkeys)? {
+        match self.call(&Request::Pubkeys {
+            client: Some(Self::client_name().to_owned()),
+            comment: Some(Self::request_comment("pubkeys").to_owned()),
+        })? {
             Response::Pubkeys { slots, .. } => Ok(slots),
             other => bail!("unexpected pubkeys response: {other:?}"),
         }
@@ -86,6 +102,11 @@ impl CryptoBackend for LocalBackend {
         match self.call(&Request::Sign {
             keyref: keyref.to_owned(),
             data: data.to_vec(),
+            client: Some(Self::client_name().to_owned()),
+            comment: Some(match keyref {
+                "OPENPGP.3" => "ssh authentication".to_owned(),
+                _ => Self::request_comment("sign").to_owned(),
+            }),
         })? {
             Response::Sign { sig, .. } => Ok(sig),
             Response::Error { error, .. } => bail!(error),
@@ -97,6 +118,8 @@ impl CryptoBackend for LocalBackend {
         match self.call(&Request::Ecdh {
             keyref: keyref.to_owned(),
             point: point.to_vec(),
+            client: Some(Self::client_name().to_owned()),
+            comment: Some(Self::request_comment("ecdh").to_owned()),
         })? {
             Response::Ecdh { shared, .. } => Ok(shared),
             Response::Error { error, .. } => bail!(error),
@@ -111,6 +134,19 @@ struct SocketBackend {
 }
 
 impl SocketBackend {
+    fn client_name() -> &'static str {
+        "gpg-agent"
+    }
+
+    fn request_comment(op: &str) -> &'static str {
+        match op {
+            "pubkeys" => "public card metadata",
+            "sign" => "openpgp signature",
+            "ecdh" => "ecdh session key exchange",
+            _ => "private card operation",
+        }
+    }
+
     fn call(&self, request: &Request) -> Result<Response> {
         let stream = UnixStream::connect(&self.path)
             .with_context(|| format!("cannot reach Passeport app at {}", self.path))?;
@@ -132,7 +168,10 @@ impl SocketBackend {
 
 impl CryptoBackend for SocketBackend {
     fn slots(&self) -> Result<Vec<SlotPublic>> {
-        match self.call(&Request::Pubkeys)? {
+        match self.call(&Request::Pubkeys {
+            client: Some(Self::client_name().to_owned()),
+            comment: Some(Self::request_comment("pubkeys").to_owned()),
+        })? {
             Response::Pubkeys { slots, .. } => Ok(slots),
             Response::Error { error, .. } => bail!(error),
             other => bail!("unexpected pubkeys response: {other:?}"),
@@ -143,6 +182,12 @@ impl CryptoBackend for SocketBackend {
         match self.call(&Request::Sign {
             keyref: keyref.to_owned(),
             data: data.to_vec(),
+            client: Some(Self::client_name().to_owned()),
+            comment: Some(match keyref {
+                "OPENPGP.3" => "ssh authentication",
+                _ => Self::request_comment("sign"),
+            }
+            .to_owned()),
         })? {
             Response::Sign { sig, .. } => Ok(sig),
             Response::Error { error, .. } => bail!(error),
@@ -154,6 +199,8 @@ impl CryptoBackend for SocketBackend {
         match self.call(&Request::Ecdh {
             keyref: keyref.to_owned(),
             point: point.to_vec(),
+            client: Some(Self::client_name().to_owned()),
+            comment: Some(Self::request_comment("ecdh").to_owned()),
         })? {
             Response::Ecdh { shared, .. } => Ok(shared),
             Response::Error { error, .. } => bail!(error),

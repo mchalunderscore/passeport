@@ -23,11 +23,14 @@
 		01F001000000000000000016 /* LaunchAgentInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000016 /* LaunchAgentInstaller.swift */; };
 		01F001000000000000000017 /* OperationApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000017 /* OperationApprovalView.swift */; };
 		01F001000000000000000018 /* Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000018 /* Hex.swift */; };
+		01F00100000000000000001E /* OperationMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F00000000000000000001E /* OperationMetadata.swift */; };
+		01F00100000000000000001F /* PublicCardCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F00000000000000000001F /* PublicCardCache.swift */; };
 		01F001000000000000000021 /* ClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000021 /* ClassificationTests.swift */; };
 		01F001000000000000000022 /* GnuPGConfiguratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000022 /* GnuPGConfiguratorTests.swift */; };
 		90CC102A2FFD5BE1009F3881 /* SeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90CC10292FFD5BE1009F3881 /* SeedStore.swift */; };
 		01F00100000000000000001A /* Passeport.icon in Resources */ = {isa = PBXBuildFile; fileRef = 904746D62FFD9EFE0033B1CE /* Passeport.icon */; };
 		01F00100000000000000001B /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01F00000000000000000001C /* Media.xcassets */; };
+		01F00100000000000000001D /* OperationAuditLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F00000000000000000001D /* OperationAuditLog.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +62,9 @@
 		01F000000000000000000016 /* LaunchAgentInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAgentInstaller.swift; sourceTree = "<group>"; };
 		01F000000000000000000017 /* OperationApprovalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationApprovalView.swift; sourceTree = "<group>"; };
 		01F000000000000000000018 /* Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Hex.swift; sourceTree = "<group>"; };
+		01F00000000000000000001E /* OperationMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationMetadata.swift; sourceTree = "<group>"; };
+		01F00000000000000000001F /* PublicCardCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicCardCache.swift; sourceTree = "<group>"; };
+		01F00000000000000000001D /* OperationAuditLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationAuditLog.swift; sourceTree = "<group>"; };
 		01F000000000000000000021 /* ClassificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassificationTests.swift; sourceTree = "<group>"; };
 		01F000000000000000000022 /* GnuPGConfiguratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnuPGConfiguratorTests.swift; sourceTree = "<group>"; };
 		01F000000000000000000023 /* PasseportTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PasseportTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -126,6 +132,7 @@
 				01F000000000000000000003 /* CoreLocator.swift */,
 				01F000000000000000000004 /* DerivedIdentity.swift */,
 				01F000000000000000000005 /* PasseportError.swift */,
+				01F00000000000000000001E /* OperationMetadata.swift */,
 				01F000000000000000000014 /* DeterminismCheck.swift */,
 			);
 			path = Core;
@@ -144,6 +151,7 @@
 			isa = PBXGroup;
 			children = (
 				01F00000000000000000000A /* AppModel.swift */,
+				01F00000000000000000001D /* OperationAuditLog.swift */,
 			);
 			path = State;
 			sourceTree = "<group>";
@@ -199,6 +207,7 @@
 			isa = PBXGroup;
 			children = (
 				01F000000000000000000010 /* ScdBridge.swift */,
+				01F00000000000000000001F /* PublicCardCache.swift */,
 			);
 			path = Bridge;
 			sourceTree = "<group>";
@@ -312,8 +321,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				01F00100000000000000001A /* Passeport.icon in Resources */,
-				01F00100000000000000001B /* Media.xcassets in Resources */,
+					01F00100000000000000001A /* Passeport.icon in Resources */,
+					01F00100000000000000001B /* Media.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -323,15 +332,18 @@
 		01F006000000000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (
-				01F001000000000000000001 /* PasseportApp.swift in Sources */,
-				01F001000000000000000002 /* CoreClient.swift in Sources */,
-				01F001000000000000000003 /* CoreLocator.swift in Sources */,
-				01F001000000000000000004 /* DerivedIdentity.swift in Sources */,
-				01F001000000000000000005 /* PasseportError.swift in Sources */,
-				01F00100000000000000000A /* AppModel.swift in Sources */,
-				90CC102A2FFD5BE1009F3881 /* SeedStore.swift in Sources */,
+				files = (
+					01F001000000000000000001 /* PasseportApp.swift in Sources */,
+					01F001000000000000000002 /* CoreClient.swift in Sources */,
+					01F001000000000000000003 /* CoreLocator.swift in Sources */,
+					01F001000000000000000004 /* DerivedIdentity.swift in Sources */,
+					01F001000000000000000005 /* PasseportError.swift in Sources */,
+					01F00100000000000000001E /* OperationMetadata.swift in Sources */,
+					01F00100000000000000000A /* AppModel.swift in Sources */,
+					01F00100000000000000001D /* OperationAuditLog.swift in Sources */,
+					90CC102A2FFD5BE1009F3881 /* SeedStore.swift in Sources */,
 				01F001000000000000000010 /* ScdBridge.swift in Sources */,
+				01F00100000000000000001F /* PublicCardCache.swift in Sources */,
 				01F001000000000000000012 /* GnuPGConfigurator.swift in Sources */,
 				01F001000000000000000013 /* SeedBackup.swift in Sources */,
 				01F001000000000000000014 /* DeterminismCheck.swift in Sources */,

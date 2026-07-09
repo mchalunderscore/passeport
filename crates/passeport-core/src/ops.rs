@@ -20,18 +20,31 @@ use crate::identity::{self, SlotRole, SlotSecret};
 #[serde(tag = "op", rename_all = "lowercase")]
 pub enum Request {
     /// Public material for all slots, so the shim can model the card.
-    Pubkeys,
+    Pubkeys {
+        #[serde(default)]
+        client: Option<String>,
+        #[serde(default)]
+        comment: Option<String>,
+    },
     /// Ed25519 signature over `data` (already DigestInfo-stripped) by `keyref`.
     Sign {
         keyref: String,
         #[serde(with = "hex_bytes")]
         data: Vec<u8>,
+        #[serde(default)]
+        client: Option<String>,
+        #[serde(default)]
+        comment: Option<String>,
     },
     /// X25519 shared secret between `keyref` and the 32-byte `point`.
     Ecdh {
         keyref: String,
         #[serde(with = "hex_bytes")]
         point: Vec<u8>,
+        #[serde(default)]
+        client: Option<String>,
+        #[serde(default)]
+        comment: Option<String>,
     },
 }
 
@@ -81,7 +94,7 @@ fn role_name(role: SlotRole) -> &'static str {
 pub fn handle(seed: &[u8; 32], user_id: &str, request: &Request) -> Result<Response> {
     let materials = identity::slot_materials(seed, user_id)?;
     match request {
-        Request::Pubkeys => {
+        Request::Pubkeys { .. } => {
             let slots = materials
                 .iter()
                 .map(|m| SlotPublic {
@@ -93,7 +106,7 @@ pub fn handle(seed: &[u8; 32], user_id: &str, request: &Request) -> Result<Respo
                 .collect();
             Ok(Response::Pubkeys { ok: true, slots })
         }
-        Request::Sign { keyref, data } => {
+        Request::Sign { keyref, data, .. } => {
             let slot = materials
                 .iter()
                 .find(|m| m.role.keyref() == keyref)
@@ -107,7 +120,7 @@ pub fn handle(seed: &[u8; 32], user_id: &str, request: &Request) -> Result<Respo
                 sig: signature.to_bytes().to_vec(),
             })
         }
-        Request::Ecdh { keyref, point } => {
+        Request::Ecdh { keyref, point, .. } => {
             let slot = materials
                 .iter()
                 .find(|m| m.role.keyref() == keyref)
@@ -210,6 +223,8 @@ mod tests {
             &Request::Sign {
                 keyref: "OPENPGP.1".into(),
                 data: data.to_vec(),
+                client: None,
+                comment: None,
             },
         )
         .unwrap();
@@ -229,6 +244,8 @@ mod tests {
         let request = Request::Sign {
             keyref: "OPENPGP.3".into(),
             data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            client: None,
+            comment: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"op\":\"sign\""));

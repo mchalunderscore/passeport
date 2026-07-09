@@ -2,24 +2,23 @@
 
 ## Do immediately
 
-- [ ] **Operation audit log** — in-app, append-only list of every private-key
+- [x] **Operation audit log** — in-app, append-only list of every private-key
   operation: timestamp, operation type, requesting client, and what was signed
   (parsed git commit summary, SSH target when recoverable). The approval prompt
   guards in the moment; the log catches silent misuse after the fact. Every
   operation already funnels through the bridge, so hook it there.
-- [ ] **Secure Enclave–wrapped seed at rest** — encrypt the keychain-stored
+- [x] **Secure Enclave–wrapped seed at rest** — encrypt the keychain-stored
   seed with a Secure Enclave key that requires biometry, instead of the
-  app-level LocalAuthentication gate. Upgrades Touch ID from an app-level check
-  toward hardware-enforced, without losing recovery-phrase portability (the SE
-  key only wraps the seed on this device).
+  app-level LocalAuthentication gate. The app now enforces this mode as
+  non-optional: non-secure legacy storage modes are not supported.
 - [ ] **Optional BIP39 passphrase ("25th word")** — domain-separates the
   identity so a leaked paper phrase alone is no longer the whole identity.
   Changes the derivation contract: must be versioned/opt-in and documented in
   DERIVATION.md.
-- [ ] **Auto-lock policy** — clear the in-memory seed on sleep, screen lock,
+- [x] **Auto-lock policy** — clear the in-memory seed on sleep, screen lock,
   or N minutes idle (configurable). Directly shrinks the stolen-unlocked-Mac
   window called out in the security model.
-- [ ] **Backup drill** — periodic "verify your recovery phrase" flow that asks
+- [x] **Backup drill** — periodic "verify your recovery phrase" flow that asks
   for a few random words of the phrase and checks them without ever displaying
   it. Guards against the paper backup quietly rotting.
 

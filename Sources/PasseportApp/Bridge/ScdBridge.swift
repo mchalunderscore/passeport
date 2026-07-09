@@ -163,29 +163,134 @@ final class ScdBridge {
     private func handle(client: Int32) async {
         defer { close(client) }
         guard let requestLine = Self.readLine(fd: client) else { return }
+        let parsed = OperationRequestMetadata.parse(requestLine: requestLine)
+        guard let parsed else {
+            Self.writeAll(fd: client, string: Self.errorJSON("invalid operation request") + "\n")
+            return
+        }
+        if parsed.kind == .unknown {
+            let operation = parsed.kind.rawValue
+            let keyref = parsed.keyref
+            let clientID = parsed.requestingClient
+            await logAuditEvent(
+                kind: operation,
+                keyref: keyref,
+                requestingClient: clientID,
+                byteCount: parsed.byteCount,
+                summary: parsed.summary,
+                outcome: "failed",
+                detail: "unsupported operation"
+            )
+            Self.writeAll(fd: client, string: Self.errorJSON("unsupported operation") + "\n")
+            return
+        }
+
+        let operation = parsed.kind.rawValue
+        let keyref = parsed.keyref
+        let clientID = parsed.requestingClient
+        let byteCount = parsed.byteCount
+        let summary = parsed.summary
+
+        // Public card metadata is not secret: serve it from the cache without
+        // unlocking the seed or asking for approval, so routine gpg lookups
+        // never pop Touch ID.
+        if parsed.kind == .keyLookup, let cached = PublicCardCache.load() {
+            await logAuditEvent(
+                kind: operation,
+                keyref: keyref,
+                requestingClient: clientID,
+                byteCount: byteCount,
+                summary: summary,
+                outcome: "succeeded",
+                detail: "served from public key cache without unlocking the seed"
+            )
+            Self.writeAll(fd: client, string: cached + "\n")
+            return
+        }
 
         let responseLine: String
         do {
-            if confirmEachOperation, let prompt = ApprovalPrompt.classify(request: requestLine) {
-                let approved = await Self.confirm(prompt: prompt)
+            if confirmEachOperation {
+                let approved = await Self.confirm(prompt: parsed.toApprovalPrompt())
                 guard approved else {
+                    await logAuditEvent(
+                        kind: operation,
+                        keyref: keyref,
+                        requestingClient: clientID,
+                        byteCount: byteCount,
+                        summary: summary,
+                        outcome: "denied",
+                        detail: "user denied confirmation prompt"
+                    )
                     Self.writeAll(fd: client, string: Self.errorJSON("operation denied by user") + "\n")
                     return
                 }
             }
-            if requireTouchIDPerOperation {
+            if requireTouchIDPerOperation, parsed.kind.requiresFreshSeedAuthorization {
                 SeedStore.clearCachedSeed()
             }
             let prf = try await SeedStore.prf(salt: SeedStore.rootSalt)
             responseLine = try Self.runOp(prf: prf, userID: userIDProvider(), request: requestLine)
+            if parsed.kind == .keyLookup {
+                PublicCardCache.store(responseLine)
+            }
+            await logAuditEvent(
+                kind: operation,
+                keyref: keyref,
+                requestingClient: clientID,
+                byteCount: byteCount,
+                summary: summary,
+                outcome: "succeeded",
+                detail: "operation completed"
+            )
         } catch {
+            await logAuditEvent(
+                kind: operation,
+                keyref: keyref,
+                requestingClient: clientID,
+                byteCount: byteCount,
+                summary: summary,
+                outcome: "failed",
+                detail: error.localizedDescription
+            )
             responseLine = Self.errorJSON(error.localizedDescription)
         }
         Self.writeAll(fd: client, string: responseLine + "\n")
     }
 
+    private func logAuditEvent(
+        kind: String,
+        keyref: String,
+        requestingClient: String,
+        byteCount: Int,
+        summary: String,
+        outcome: String,
+        detail: String
+    ) async {
+        let event = OperationAuditEvent(
+            id: UUID(),
+            timestamp: Date(),
+            kind: kind,
+            keyref: keyref,
+            requestingClient: requestingClient,
+            byteCount: byteCount,
+            summary: summary,
+            details: detail,
+            outcome: outcome
+        )
+        await OperationAuditLog.shared.append(event: event)
+    }
+
     private static func confirm(prompt: ApprovalPrompt) async -> Bool {
         await MainActor.run { OperationApproval.present(prompt) }
+    }
+
+    /// Derive the public card metadata from an already-unlocked PRF and cache
+    /// it, so later `pubkeys` lookups are served without a seed unlock.
+    static func refreshPublicCardCache(prf: Data, userID: String) {
+        let request = #"{"op":"pubkeys","client":"Passeport app","comment":"cache public card metadata"}"#
+        guard let line = try? runOp(prf: prf, userID: userID, request: request) else { return }
+        PublicCardCache.store(line)
     }
 
     /// Shell `passeport-core op` with the PRF injected on stdin.

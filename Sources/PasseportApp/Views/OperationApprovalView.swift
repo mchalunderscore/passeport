@@ -15,6 +15,8 @@ struct ApprovalPrompt {
     let byteCount: Int
     /// Hex of the leading bytes being signed, empty when not applicable.
     let hexPreview: String
+    let requestingClient: String
+    let summary: String
 
     /// Classify a bridge request (JSON) into an approval prompt, or nil if it
     /// needs no confirmation (e.g. a public-key lookup during enumeration).
@@ -24,25 +26,21 @@ struct ApprovalPrompt {
     /// login doesn't carry the SSHSIG magic, so classification is by slot, not
     /// by payload.
     static func classify(request: String) -> ApprovalPrompt? {
-        guard let object = try? JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any],
-              let op = object["op"] as? String else {
-            return ApprovalPrompt(kind: .unknown, keyref: "?", byteCount: 0, hexPreview: "")
+        guard let metadata = OperationRequestMetadata.parse(requestLine: request) else {
+            return ApprovalPrompt(
+                kind: .unknown,
+                keyref: "?",
+                byteCount: 0,
+                hexPreview: "",
+                requestingClient: OperationRequestMetadata.defaultClient,
+                summary: "unknown operation"
+            )
         }
-        let keyref = object["keyref"] as? String ?? "?"
-        switch op {
-        case "sign":
-            let data = (object["data"] as? String).flatMap { Hex.decode($0) } ?? Data()
-            let isAuthKey = keyref == "OPENPGP.3"
-            if isAuthKey || data.starts(with: Data("SSHSIG".utf8)) {
-                return ApprovalPrompt(kind: .sshAuth, keyref: keyref, byteCount: data.count, hexPreview: "")
-            }
-            let preview = Hex.encode(data.prefix(24))
-            return ApprovalPrompt(kind: .sign, keyref: keyref, byteCount: data.count, hexPreview: preview)
-        case "ecdh":
-            return ApprovalPrompt(kind: .decrypt, keyref: keyref, byteCount: 0, hexPreview: "")
-        default:
-            return nil // pubkeys and anything non-secret: no prompt
+
+        if metadata.kind == .keyLookup {
+            return nil
         }
+        return metadata.toApprovalPrompt()
     }
 }
 
@@ -122,45 +120,60 @@ struct OperationApprovalView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(tint.opacity(0.15))
-                    Image(systemName: icon)
-                        .font(.system(size: 27, weight: .semibold))
-                        .foregroundStyle(tint)
+                VStack(spacing: 8) {
+                    Text("Request from \(prompt.requestingClient)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    Circle()
+                        .fill(tint.opacity(0.15))
+                        .frame(width: 58, height: 58)
+                        .overlay(
+                            Image(systemName: icon)
+                                .font(.system(size: 27, weight: .semibold))
+                                .foregroundStyle(tint)
+                        )
+
+                    if !prompt.summary.isEmpty {
+                        Text(prompt.summary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    Text(title)
+                        .font(.headline)
+
+                    Text(subtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !prompt.hexPreview.isEmpty {
+                        dataBlock
+                            .padding(.top, 2)
+                    }
                 }
-                .frame(width: 58, height: 58)
+                .padding(.horizontal, 22)
+                .padding(.top, 22)
+                .padding(.bottom, 16)
 
-                Text(title)
-                    .font(.headline)
+                Divider()
 
-                Text(subtitle)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !prompt.hexPreview.isEmpty {
-                    dataBlock
-                        .padding(.top, 2)
+                HStack(spacing: 12) {
+                    Button("Deny") { onDecision(false) }
+                        .keyboardShortcut(.cancelAction)
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                    Button("Approve") { onDecision(true) }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity, minHeight: 34)
                 }
+                .controlSize(.large)
+                .padding(16)
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 22)
-            .padding(.bottom, 16)
-
-            Divider()
-
-            HStack(spacing: 12) {
-                Button("Deny") { onDecision(false) }
-                    .keyboardShortcut(.cancelAction)
-                    .frame(maxWidth: .infinity, minHeight: 34)
-                Button("Approve") { onDecision(true) }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity, minHeight: 34)
-            }
-            .controlSize(.large)
-            .padding(16)
         }
         .frame(width: 340)
         .panelChrome()
@@ -223,11 +236,11 @@ struct OperationApprovalView: View {
     private var subtitle: String {
         switch prompt.kind {
         case .sign:
-            "gpg wants to sign with your OpenPGP key (\(prompt.keyref))."
+            "gpg-agent wants to sign with your OpenPGP key (\(prompt.keyref))."
         case .sshAuth:
             "An SSH client wants to authenticate as you using your authentication key (\(prompt.keyref))."
         case .decrypt:
-            "gpg wants to decrypt a message with your encryption subkey (\(prompt.keyref))."
+            "gpg-agent wants to decrypt a message with your encryption subkey (\(prompt.keyref))."
         case .unknown:
             "Passeport received a request it could not describe."
         }

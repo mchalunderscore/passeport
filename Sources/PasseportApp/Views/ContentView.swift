@@ -22,6 +22,7 @@ struct ContentView: View {
     @EnvironmentObject private var app: AppModel
     @State private var section: AppSection = .keys
     @State private var showingRestore = false
+    @State private var showingLaunchAtLoginFailure = false
 
     var body: some View {
         NavigationSplitView {
@@ -56,6 +57,21 @@ struct ContentView: View {
         .sheet(isPresented: $showingRestore) {
             RestoreSheet()
                 .environmentObject(app)
+        }
+        .sheet(item: Binding(
+            get: { app.backupDrillSession },
+            set: { if $0 == nil { app.dismissBackupDrill() } }
+        )) { session in
+            BackupDrillSheet(session: session)
+                .environmentObject(app)
+        }
+        .alert("Could not update login item", isPresented: $showingLaunchAtLoginFailure) {
+            Button("OK", role: .cancel) { showingLaunchAtLoginFailure = false }
+        } message: {
+            Text(app.launchAtLoginFailure ?? "Unknown error")
+        }
+        .onChange(of: app.launchAtLoginFailure) { _, newValue in
+            showingLaunchAtLoginFailure = newValue != nil
         }
     }
 
@@ -163,10 +179,37 @@ private struct KeysSection: View {
             }
 
             if app.hasSeed {
-                // KeyDetailView scrolls the key material (top-aligned) or centers
-                // its empty state, each within the detail pane.
-                KeyDetailView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // KeyDetailView scrolls the key material (top-aligned) or shows a
+                // compact unavailable state while keys are unavailable.
+                if app.identity != nil {
+                    KeyDetailView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if app.isBusy {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Deriving identity from seed…")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ContentUnavailableView(
+                        "No Keys In Memory",
+                        systemImage: "lock",
+                        description: Text("Derive keys from your seed to see them here.")
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else if app.isBusy {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Creating a new identity…")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Spacer(minLength: 0)
             }
@@ -217,7 +260,7 @@ private struct BackupSection: View {
             VStack(alignment: .leading, spacing: 20) {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Your identity is a 24-word recovery phrase. The seed is stored only on this Mac — write the phrase down to recover it, or to set the same identity up on another Mac. Keep a revocation certificate so you can retire the key.")
+                        Text("Your identity is a 24-word recovery phrase. The seed is stored only on this Mac — write the phrase down to recover it, or to set the same identity up on another Mac.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,23 +274,42 @@ private struct BackupSection: View {
                             .disabled(app.isBusy || !app.hasSeed)
 
                             Button {
+                                app.startBackupDrill()
+                            } label: {
+                                Label("Verify Recovery Phrase", systemImage: "checkmark.shield")
+                            }
+                            .disabled(app.isBusy || !app.hasSeed)
+
+                            Button {
                                 showingRestore = true
                             } label: {
                                 Label("Restore…", systemImage: "arrow.uturn.backward")
                             }
                             .disabled(app.isBusy)
-
-                            Button {
-                                app.saveRevocationCertificate()
-                            } label: {
-                                Label("Save Revocation Certificate", systemImage: "xmark.seal")
-                            }
-                            .disabled(app.isBusy || !app.hasSeed)
                         }
                     }
                     .padding(6)
                 } label: {
                     Label("Backup & Recovery", systemImage: "lifepreserver")
+                }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("A revocation certificate lets you publicly retire the key if the seed is ever lost or compromised. Save it now and keep it with your backups.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button {
+                            app.saveRevocationCertificate()
+                        } label: {
+                            Label("Save Revocation Certificate", systemImage: "xmark.seal")
+                        }
+                        .disabled(app.isBusy || !app.hasSeed)
+                    }
+                    .padding(6)
+                } label: {
+                    Label("Revocation Certificate", systemImage: "xmark.seal")
                 }
                 Spacer(minLength: 0)
             }
@@ -350,7 +412,7 @@ private struct OptionsSection: View {
             }
             Section {
                 Toggle("Confirm each signature or decryption", isOn: $app.confirmEachOperation)
-                Toggle("Require Touch ID for each operation", isOn: $app.requireTouchIDPerOperation)
+                    Toggle("Require Touch ID for each operation", isOn: $app.requireTouchIDPerOperation)
             } header: {
                 Text("Operation approval")
             } footer: {
@@ -358,8 +420,75 @@ private struct OptionsSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Auto-lock") {
+                Toggle("Auto-lock when screen locks or sleeps", isOn: $app.autoLockOnSleep)
+                Toggle("Auto-lock after inactivity", isOn: $app.autoLockOnIdle)
+                Picker("Idle timeout", selection: $app.autoLockIdleMinutes) {
+                    Text("1 minute").tag(1)
+                    Text("2 minutes").tag(2)
+                    Text("5 minutes").tag(5)
+                    Text("10 minutes").tag(10)
+                    Text("15 minutes").tag(15)
+                    Text("30 minutes").tag(30)
+                    Text("60 minutes").tag(60)
+                }
+                .pickerStyle(.segmented)
+                .disabled(!app.autoLockOnIdle)
+            }
+            Section("Operation audit log") {
+                if app.operationAuditEvents.isEmpty {
+                    Text("No operations have been logged yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(app.operationAuditEvents) { event in
+                        OperationAuditRow(event: event)
+                    }
+                }
+                HStack {
+                    Button("Refresh") { Task { await app.refreshOperationAuditLog() } }
+                    Button("Clear") { app.clearOperationAuditLog() }
+                        .foregroundStyle(.red)
+                }
+            }
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct OperationAuditRow: View {
+    let event: OperationAuditEvent
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(event.kind)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Text(event.outcome.uppercased())
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Text("\(Self.timestampFormatter.string(from: event.timestamp)) · \(event.requestingClient)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("\(event.summary)\(event.byteCount > 0 ? " · \(event.byteCount) bytes" : "")")
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+            if !event.details.isEmpty {
+                Text(event.details)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -569,5 +698,56 @@ private struct RestoreSheet: View {
 
     private func moveFocus(from index: Int) {
         focusedWord = min(index + 1, 23)
+    }
+}
+
+private struct BackupDrillSheet: View {
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let session: BackupDrillSession
+    @State private var answers: [String]
+
+    init(session: BackupDrillSession) {
+        self.session = session
+        self._answers = State(initialValue: Array(repeating: "", count: session.wordIndices.count))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Verify Recovery Phrase")
+                .font(.title3.weight(.semibold))
+            Text("Enter the exact words at the prompted positions. No full phrase is shown.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            ForEach(Array(session.wordIndices.enumerated()), id: \.offset) { offset, position in
+                HStack {
+                    Text("Word \(position + 1)")
+                        .frame(width: 85, alignment: .leading)
+                    TextField("", text: $answers[offset])
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+
+            HStack {
+                Button("Cancel", role: .cancel) {
+                    dismiss()
+                    app.dismissBackupDrill()
+                }
+                Spacer()
+                Button("Verify") {
+                    app.submitBackupDrill(answers: answers)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(app.isBusy)
+            }
+            .padding(.top, 4)
+        }
+        .padding(28)
+        .frame(width: 420)
+        .onAppear {
+            answers = Array(repeating: "", count: session.wordIndices.count)
+        }
     }
 }
