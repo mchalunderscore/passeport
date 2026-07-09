@@ -6,6 +6,11 @@ struct PasseportApp: App {
     @StateObject private var appModel = AppModel()
 
     init() {
+        // The bridge and ssh-agent sockets write to peers that can hang up
+        // mid-operation (e.g. ssh Ctrl-C'd while an approval prompt is up);
+        // without this, that write's SIGPIPE kills the app. Writers see a
+        // plain EPIPE instead.
+        signal(SIGPIPE, SIG_IGN)
         // A single-window utility has no use for window tabs; this also
         // removes the "Show Tab Bar" items from the View menu.
         NSWindow.allowsAutomaticWindowTabbing = false

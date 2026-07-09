@@ -210,12 +210,27 @@ final class ScdBridge {
             return cached
         }
 
+        // Public key lookups are not secret and must never prompt — gpg
+        // issues them while building the card, before any real key use, and
+        // the ssh agent lists identities the same way. A lookup that misses
+        // the cache may therefore only run when the identity is already
+        // unlocked; otherwise refuse cleanly instead of popping a passphrase
+        // panel or Touch ID from a background process.
+        if parsed.kind == .keyLookup, !SeedStore.canDeriveSilently() {
+            await logAuditEvent(
+                kind: operation,
+                keyref: keyref,
+                requestingClient: clientID,
+                byteCount: byteCount,
+                summary: summary,
+                outcome: "failed",
+                detail: "identity locked; lookup refused rather than prompting"
+            )
+            return Self.errorJSON(PasseportError.identityLocked.localizedDescription)
+        }
+
         let responseLine: String
         do {
-            // Public key lookups are not secret and must never prompt — gpg
-            // issues them while building the card, before any real key use.
-            // Prompting here (as an "unknown operation") is what made a
-            // missing identity cascade into gpg's "insert a smartcard".
             if confirmEachOperation, parsed.kind != .keyLookup {
                 let approved = await Self.confirm(prompt: parsed.toApprovalPrompt())
                 guard approved else {
@@ -232,7 +247,7 @@ final class ScdBridge {
                 }
             }
             if requireTouchIDPerOperation, parsed.kind.requiresFreshSeedAuthorization {
-                SeedStore.clearCachedSeed()
+                try await SeedStore.requireFreshAuthorization()
             }
             // A passphrase identity that isn't unlocked yet (e.g. after
             // auto-lock) must be unlocked before it can sign/decrypt. Prompt
@@ -320,7 +335,7 @@ final class ScdBridge {
             do {
                 try await SeedStore.unlock(passphrase: entered)
             } catch PasseportError.incorrectPassphrase {
-                errorMessage = "That passphrase does not match this identity."
+                errorMessage = PasseportError.incorrectPassphrase.localizedDescription
             }
         }
         return true

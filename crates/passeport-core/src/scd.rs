@@ -10,8 +10,8 @@
 //! and gates it behind Touch ID — the shim never sees key material. For
 //! development, `PASSEPORT_SCD_PRF` selects an in-process backend.
 
+use std::cell::Cell;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
@@ -148,21 +148,7 @@ impl SocketBackend {
     }
 
     fn call(&self, request: &Request) -> Result<Response> {
-        let stream = UnixStream::connect(&self.path)
-            .with_context(|| format!("cannot reach Passeport app at {}", self.path))?;
-        let mut writer = &stream;
-        let line = serde_json::to_string(request)?;
-        writer.write_all(line.as_bytes())?;
-        writer.write_all(b"\n")?;
-        writer.flush()?;
-
-        let mut reader = BufReader::new(&stream);
-        let mut response = String::new();
-        reader
-            .read_line(&mut response)
-            .context("no response from Passeport app")?;
-        serde_json::from_str(response.trim())
-            .with_context(|| format!("bad response from app: {}", response.trim()))
+        ops::call_socket(&self.path, request)
     }
 }
 
@@ -237,6 +223,9 @@ struct Card {
     aid: Vec<u8>,
     slots: Vec<Slot>,
     backend: Box<dyn CryptoBackend>,
+    /// Whether [`Card::slot_is_current`] has already confirmed the backend
+    /// against this model. One check per session; see there for the tradeoff.
+    verified: Cell<bool>,
 }
 
 impl Card {
@@ -285,6 +274,7 @@ impl Card {
             aid,
             slots,
             backend,
+            verified: Cell::new(false),
         })
     }
 
@@ -299,23 +289,37 @@ impl Card {
             .expect("all three slots exist")
     }
 
-    /// Confirm the live backend still serves the key this card model
-    /// advertises for `role`. The model is a snapshot from startup, and the
-    /// identity can change underneath it (seed reset/restore in the app);
-    /// signing with a different key than the agent was promised produces
-    /// signatures that can never verify.
-    fn slot_is_current(&self, role: SlotRole) -> Result<()> {
-        let snapshot = self.slot(role);
-        let fresh = self.backend.slots()?;
-        let live = fresh
-            .iter()
-            .find(|public| public.keyref == snapshot.keyref());
-        match live {
-            Some(public) if public.q == snapshot.q => Ok(()),
-            _ => bail!(
-                "card identity changed since gpg-agent started; run `gpgconf --kill all` to reload"
-            ),
+    /// Confirm the live backend still serves the keys this card model
+    /// advertises. The model is a snapshot from startup, and the identity can
+    /// change underneath it (seed reset/restore in the app); signing with a
+    /// different key than the agent was promised produces signatures that can
+    /// never verify.
+    ///
+    /// The check costs a full backend round trip (a fresh socket connect plus
+    /// an audit-log write in the app, or a complete re-derivation locally), so
+    /// it runs once per session and the verdict is memoized: the seed cannot
+    /// change without the app restarting its bridge, which drops the socket
+    /// and ends this session anyway. Nothing within a session re-reads the
+    /// slot model, so there is no event to invalidate on.
+    fn slot_is_current(&self, _role: SlotRole) -> Result<()> {
+        if self.verified.get() {
+            return Ok(());
         }
+        // The fresh response carries every slot, so verify the whole model —
+        // the memoized verdict then covers any role's later operation.
+        let fresh = self.backend.slots()?;
+        let all_current = self.slots.iter().all(|snapshot| {
+            fresh
+                .iter()
+                .any(|public| public.keyref == snapshot.keyref() && public.q == snapshot.q)
+        });
+        if !all_current {
+            bail!(
+                "card identity changed since gpg-agent started; run `gpgconf --kill all` to reload"
+            );
+        }
+        self.verified.set(true);
+        Ok(())
     }
 
     fn find(&self, spec: &str) -> Option<&Slot> {
@@ -697,6 +701,12 @@ impl<W: Write> Session<'_, W> {
                 None => return self.err(ERR_NO_SECKEY, "No such key on this card"),
             }
         };
+        // The decrypt slot is X25519 and cannot sign. Refuse here with the
+        // same error as an unknown key, before the backend prompts the user
+        // to approve an operation that can only fail.
+        if role == SlotRole::Decrypt {
+            return self.err(ERR_NO_SECKEY, "Key cannot sign");
+        }
         self.sign_with(role)
     }
 
@@ -854,6 +864,8 @@ fn public_key_sexp(slot: &Slot) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
+
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 
@@ -865,6 +877,47 @@ mod tests {
             user_id: "Passeport Test <test@example.invalid>".to_owned(),
         });
         Card::build(backend).unwrap()
+    }
+
+    /// A [`LocalBackend`] that counts calls, to pin down how often the card
+    /// actually reaches the backend (each call is a prompt-and-audit event in
+    /// production).
+    struct CountingBackend {
+        inner: LocalBackend,
+        slots_calls: Rc<Cell<usize>>,
+        sign_calls: Rc<Cell<usize>>,
+    }
+
+    impl CryptoBackend for CountingBackend {
+        fn slots(&self) -> Result<Vec<SlotPublic>> {
+            self.slots_calls.set(self.slots_calls.get() + 1);
+            self.inner.slots()
+        }
+
+        fn sign(&self, keyref: &str, data: &[u8]) -> Result<Vec<u8>> {
+            self.sign_calls.set(self.sign_calls.get() + 1);
+            self.inner.sign(keyref, data)
+        }
+
+        fn ecdh(&self, keyref: &str, point: &[u8]) -> Result<Vec<u8>> {
+            self.inner.ecdh(keyref, point)
+        }
+    }
+
+    fn counting_card() -> (Card, Rc<Cell<usize>>, Rc<Cell<usize>>) {
+        let prf = [7u8; 32];
+        let seed = identity::derive_pgp_seed(&prf).unwrap();
+        let slots_calls = Rc::new(Cell::new(0));
+        let sign_calls = Rc::new(Cell::new(0));
+        let backend = Box::new(CountingBackend {
+            inner: LocalBackend {
+                seed,
+                user_id: "Passeport Test <test@example.invalid>".to_owned(),
+            },
+            slots_calls: Rc::clone(&slots_calls),
+            sign_calls: Rc::clone(&sign_calls),
+        });
+        (Card::build(backend).unwrap(), slots_calls, sign_calls)
     }
 
     fn talk(card: &Card, commands: &str) -> Vec<u8> {
@@ -914,6 +967,41 @@ mod tests {
         let reply = text(&talk(&card, &commands));
         assert!(reply.contains("No such key"), "got: {reply}");
         assert!(!reply.contains("\nD "), "must not return a signature");
+    }
+
+    #[test]
+    fn pksign_with_decrypt_key_refuses_without_touching_backend() {
+        // The decrypt slot is X25519; a PKSIGN naming its keygrip must fail
+        // up front — not after the backend has prompted for approval.
+        let (card, slots_calls, sign_calls) = counting_card();
+        let build_calls = slots_calls.get();
+        let decrypt_grip = hex::encode_upper(card.slot(SlotRole::Decrypt).keygrip);
+        let commands = format!(
+            "SETDATA {}\nPKSIGN {decrypt_grip}\nBYE\n",
+            hex::encode([0xABu8; 32])
+        );
+        let reply = text(&talk(&card, &commands));
+        assert!(reply.contains("Key cannot sign"), "got: {reply}");
+        assert!(!reply.contains("\nD "), "must not return a signature");
+        assert_eq!(sign_calls.get(), 0, "backend sign must not be reached");
+        assert_eq!(slots_calls.get(), build_calls, "no staleness round trip");
+    }
+
+    #[test]
+    fn staleness_check_hits_backend_once_per_session() {
+        let (card, slots_calls, sign_calls) = counting_card();
+        assert_eq!(slots_calls.get(), 1, "Card::build fetches the slots once");
+        let digest = hex::encode([0xABu8; 32]);
+        let commands = format!(
+            "SETDATA {digest}\nPKSIGN OPENPGP.1\nSETDATA {digest}\nPKSIGN OPENPGP.3\nBYE\n"
+        );
+        talk(&card, &commands);
+        assert_eq!(sign_calls.get(), 2, "both signatures reach the backend");
+        assert_eq!(
+            slots_calls.get(),
+            2,
+            "one staleness check for the whole session"
+        );
     }
 
     #[test]

@@ -95,7 +95,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLoginFailure: String?
 
     private let core = CoreClient()
-    private var deriveInFlight = false
+    /// Retry to run after a successful on-demand unlock (see `requestUnlock`).
+    private var pendingUnlockRetry: ((AppModel) -> Void)?
+    /// Deferred work scheduled by the current `runBusy` operation, run after
+    /// `isBusy` clears so the follow-up's own `runBusy` isn't rejected.
+    private var pendingFollowUp: (() -> Void)?
     private static let pgpUserIDKey = "PasseportPGPUserID"
     private static let confirmEachOperationKey = "PasseportConfirmEachOperation"
     private static let requireTouchIDPerOperationKey = "PasseportRequireTouchIDPerOperation"
@@ -259,12 +263,6 @@ final class AppModel: ObservableObject {
     private func runDerive(status message: String) {
         runBusy("Deriving keys") { [self] in
             if identity != nil { return }
-            if deriveInFlight {
-                status = "Derivation already running"
-                return
-            }
-            deriveInFlight = true
-            defer { deriveInFlight = false }
             try await self.deriveFromCachedSeed()
             self.status = message
         }
@@ -283,13 +281,11 @@ final class AppModel: ObservableObject {
 
     func cancelPassphrase() {
         passphraseRequest = nil
+        pendingUnlockRetry = nil
     }
 
     private func runCreate(passphrase: String) {
         runBusy("Creating a new identity") { [self] in
-            if deriveInFlight { return }
-            deriveInFlight = true
-            defer { deriveInFlight = false }
             let seed = try await SeedStore.createRandomSeed()
             self.hasSeed = true
             self.identity = nil
@@ -308,14 +304,31 @@ final class AppModel: ObservableObject {
     }
 
     private func runUnlock(passphrase: String) {
+        let retry = pendingUnlockRetry
+        pendingUnlockRetry = nil
         runBusy("Unlocking identity") { [self] in
-            if deriveInFlight { return }
-            deriveInFlight = true
-            defer { deriveInFlight = false }
             try await SeedStore.unlock(passphrase: passphrase)
-            try await self.deriveFromCachedSeed()
+            if identity == nil {
+                try await self.deriveFromCachedSeed()
+            }
             self.status = "Identity unlocked"
+            if let retry {
+                self.pendingFollowUp = { [weak self] in
+                    guard let self else { return }
+                    retry(self)
+                }
+            }
         }
+    }
+
+    /// Present the standard unlock sheet, resuming `retry` once the
+    /// passphrase is accepted. This is what keeps passphrase-gated actions
+    /// (e.g. saving the revocation certificate) reachable even when the keys
+    /// are already derived but the session material is locked.
+    private func requestUnlock(retry: @escaping (AppModel) -> Void) {
+        pendingUnlockRetry = retry
+        passphraseRequest = PassphraseRequest(purpose: .unlock)
+        status = "Enter your passphrase to continue"
     }
 
     /// Unlock the seed (Touch ID once per session) and derive the identity.
@@ -378,19 +391,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Start the native SSH agent if it isn't already running and publish
+    /// its state. Every path that needs the agent goes through here.
+    private func ensureSSHAgentRunning() async throws {
+        if !(await SSHAgentServer.shared.isRunning) {
+            try await SSHAgentServer.shared.start()
+        }
+        sshAgentRunning = true
+    }
+
     /// Bring the sockets up on launch so gpg and ssh work whenever the app
     /// runs. Only binds sockets; no seed access until an operation arrives.
     func startBridgeIfNeeded() {
         Task { @MainActor in
-            if await SSHAgentServer.shared.isRunning {
-                self.sshAgentRunning = true
-            } else {
-                do {
-                    try await SSHAgentServer.shared.start()
-                    self.sshAgentRunning = true
-                } catch {
-                    self.status = error.localizedDescription
-                }
+            do {
+                try await self.ensureSSHAgentRunning()
+            } catch {
+                self.status = error.localizedDescription
             }
             guard !(await ScdBridge.shared.isRunning) else {
                 self.bridgeRunning = true
@@ -412,8 +429,7 @@ final class AppModel: ObservableObject {
                 self.sshAgentRunning = false
                 self.status = "SSH agent stopped"
             } else {
-                try await SSHAgentServer.shared.start()
-                self.sshAgentRunning = true
+                try await self.ensureSSHAgentRunning()
                 self.status = "SSH agent running"
             }
         }
@@ -445,7 +461,7 @@ final class AppModel: ObservableObject {
                 )
             }.value
             self.ageRecipient = result.recipient
-            self.status = "age ready — add \(result.binDirectory) to PATH, then `age -r \(result.recipient)`"
+            self.status = "age ready — encrypt with `age -r \(result.recipient)`, decrypt with `age -d -i \(result.identityFilePath)`"
         }
     }
 
@@ -453,10 +469,7 @@ final class AppModel: ObservableObject {
     /// agent first if needed.
     func configureSSH() {
         runBusy("Configuring SSH") { [self] in
-            if !(await SSHAgentServer.shared.isRunning) {
-                try await SSHAgentServer.shared.start()
-                self.sshAgentRunning = true
-            }
+            try await self.ensureSSHAgentRunning()
             let result = try SSHConfigurator.configure(socketPath: SSHAgentServer.socketURL.path)
             self.status = "SSH configured — ssh now uses the Passeport agent via \(result.configPath)"
         }
@@ -597,6 +610,10 @@ final class AppModel: ObservableObject {
 
     func saveRevocationCertificate() {
         runBusy("Preparing revocation certificate") { [self] in
+            if await SeedStore.needsPassphrase() {
+                self.requestUnlock { $0.saveRevocationCertificate() }
+                return
+            }
             let prf = try await SeedStore.prf(salt: SeedStore.rootSalt)
             let userID = self.pgpUserID.trimmedNonEmpty(defaultValue: "Passeport <passeport@localhost>")
             let cert = try SeedBackup.revocationCertificate(prf: prf, userID: userID)
@@ -629,15 +646,12 @@ final class AppModel: ObservableObject {
         }
         let publicKey = identity.ssh.publicKey
         runBusy("Configuring git SSH signing") { [self] in
-            if !(await SSHAgentServer.shared.isRunning) {
-                try await SSHAgentServer.shared.start()
-                self.sshAgentRunning = true
-            }
+            try await self.ensureSSHAgentRunning()
             let socketPath = SSHAgentServer.socketURL.path
             let result: GitConfigurator.SSHSigningResult = try await Task.detached(priority: .userInitiated) {
                 try GitConfigurator.configureSSHSigning(publicKey: publicKey, sshAuthSock: socketPath)
             }.value
-            self.status = "git will sign commits with SSH — ensure SSH_AUTH_SOCK=\(result.sshAuthSock)"
+            self.status = "git will sign commits with SSH via \(result.signingProgramPath) — no shell setup needed"
         }
     }
 
@@ -771,6 +785,10 @@ final class AppModel: ObservableObject {
                 status = error.localizedDescription
             }
             isBusy = false
+            if let followUp = pendingFollowUp {
+                pendingFollowUp = nil
+                followUp()
+            }
         }
     }
 

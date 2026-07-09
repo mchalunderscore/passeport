@@ -835,10 +835,19 @@ private struct RestoreSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var words = Array(repeating: "", count: 24)
     @State private var passphrase = ""
+    @State private var passphraseConfirmation = ""
     @FocusState private var focusedWord: Int?
 
     private var isComplete: Bool {
         words.allSatisfy { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    /// A restore passphrase can't be verified against anything, and a typo
+    /// silently derives a different identity *and* records a verifier that
+    /// then rejects the correct passphrase — so, like the create flow, ask
+    /// twice.
+    private var passphraseMatches: Bool {
+        passphrase.isEmpty || passphrase == passphraseConfirmation
     }
 
     private var phrase: String {
@@ -875,6 +884,15 @@ private struct RestoreSheet: View {
                     .foregroundStyle(.secondary)
                 SecureField("Only if this identity was created with one", text: $passphrase)
                     .textFieldStyle(.roundedBorder)
+                if !passphrase.isEmpty {
+                    SecureField("Confirm passphrase", text: $passphraseConfirmation)
+                        .textFieldStyle(.roundedBorder)
+                    if !passphraseConfirmation.isEmpty && !passphraseMatches {
+                        Text("Passphrases don’t match.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
 
             HStack {
@@ -885,7 +903,7 @@ private struct RestoreSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!isComplete)
+                .disabled(!isComplete || !passphraseMatches)
                 .frame(minWidth: 112)
             }
             .padding(.top, 4)

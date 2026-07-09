@@ -5,7 +5,8 @@
 //! reaches this process only on stdin and only for the lifetime of one call;
 //! the shim itself never sees it.
 
-use std::io::{self, Read};
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
 
 use anyhow::{Context, Result, bail};
 use ed25519_dalek::{Signer, SigningKey};
@@ -79,6 +80,27 @@ pub struct SlotPublic {
     pub q: Vec<u8>,
     #[serde(with = "hex_bytes")]
     pub fpr: Vec<u8>,
+}
+
+/// Send one request to the Passeport app bridge over its Unix socket and read
+/// the one-line JSON response. The single encoder/decoder for the bridge wire
+/// protocol, shared by the scd shim and the age plugin.
+pub fn call_socket(path: &str, request: &Request) -> Result<Response> {
+    let stream = UnixStream::connect(path)
+        .with_context(|| format!("cannot reach the Passeport app at {path} (is it running?)"))?;
+    let mut writer = &stream;
+    let line = serde_json::to_string(request)?;
+    writer.write_all(line.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut reader = BufReader::new(&stream);
+    let mut response = String::new();
+    reader
+        .read_line(&mut response)
+        .context("no response from Passeport app")?;
+    serde_json::from_str(response.trim())
+        .with_context(|| format!("bad response from app: {}", response.trim()))
 }
 
 fn role_name(role: SlotRole) -> &'static str {

@@ -10,13 +10,13 @@
 //! base64 body wrapped at 64 columns and terminated by a short (<64) line.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 
 use crate::age;
+use crate::ops;
 
 /// The stanza type this plugin emits and recognizes. Distinct from age's
 /// native `X25519` so age routes decryption to us rather than trying it
@@ -112,11 +112,11 @@ fn identity_v1<R: BufRead, W: Write>(
         }
     }
 
-    let Some(&recipient_public) = identities.first() else {
+    if identities.is_empty() {
         io.write(&Stanza::message("error", &["identity", "0"], b"no identity"))?;
         io.write(&Stanza::done())?;
         return Ok(());
-    };
+    }
 
     // First stanza we can open wins for each file index; age only needs one.
     let mut solved: std::collections::HashSet<usize> = std::collections::HashSet::new();
@@ -124,12 +124,18 @@ fn identity_v1<R: BufRead, W: Write>(
         if solved.contains(file_index) {
             continue;
         }
-        let opened = ecdh(share)
-            .and_then(|shared| age::unwrap_file_key(&recipient_public, share, &shared, body));
-        if let Ok(file_key) = opened {
+        // One ECDH per stanza — the shared secret depends only on the share —
+        // then try each identity: its public key salts the HKDF wrap key, so
+        // a stanza encrypted to any of them must find its match here.
+        let Ok(shared) = ecdh(share) else { continue };
+        for recipient_public in &identities {
+            let Ok(file_key) = age::unwrap_file_key(recipient_public, share, &shared, body) else {
+                continue;
+            };
             io.write(&Stanza::message("file-key", &[&file_index.to_string()], &file_key))?;
             io.expect_ok()?;
             solved.insert(*file_index);
+            break;
         }
         // Unsolved stanzas are left silent; age reports "no identity matched"
         // if nothing opens. A per-stanza error would abort the other files.
@@ -154,38 +160,19 @@ fn parse_recipient_stanza(stanza: &Stanza) -> Option<(usize, [u8; 32], Vec<u8>)>
 /// to open the file key locally.
 fn bridge_ecdh(share: &[u8; 32]) -> Result<[u8; 32]> {
     let path = std::env::var("PASSEPORT_SCD_SOCKET").unwrap_or_else(|_| default_socket_path());
-    let stream = UnixStream::connect(&path)
-        .with_context(|| format!("cannot reach the Passeport app at {path} (is it running?)"))?;
-    let request = serde_json::json!({
-        "op": "ecdh",
-        "keyref": "OPENPGP.2",
-        "point": hex::encode(share),
-        "client": "age (age-plugin-passeport)",
-        "comment": "decrypt an age file",
-    });
-
-    let mut writer = &stream;
-    writer.write_all(serde_json::to_string(&request)?.as_bytes())?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
-
-    let mut reader = BufReader::new(&stream);
-    let mut line = String::new();
-    reader.read_line(&mut line).context("no response from Passeport app")?;
-    let value: serde_json::Value =
-        serde_json::from_str(line.trim()).context("bad response from Passeport app")?;
-    if value.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-        let message = value.get("error").and_then(|v| v.as_str()).unwrap_or("ecdh failed");
-        bail!("{message}");
+    let request = ops::Request::Ecdh {
+        keyref: "OPENPGP.2".to_owned(),
+        point: share.to_vec(),
+        client: Some("age (age-plugin-passeport)".to_owned()),
+        comment: Some("decrypt an age file".to_owned()),
+    };
+    match ops::call_socket(&path, &request)? {
+        ops::Response::Ecdh { shared, .. } => shared
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("shared secret not 32 bytes")),
+        ops::Response::Error { error, .. } => bail!(error),
+        other => bail!("unexpected ecdh response: {other:?}"),
     }
-    let shared_hex = value
-        .get("shared")
-        .and_then(|v| v.as_str())
-        .context("response missing shared secret")?;
-    let shared = hex::decode(shared_hex).context("shared secret not hex")?;
-    shared
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("shared secret not 32 bytes"))
 }
 
 fn default_socket_path() -> String {
@@ -361,6 +348,47 @@ mod tests {
         assert_eq!(file_key_stanza.command, "file-key");
         assert_eq!(file_key_stanza.args[0], "0");
         assert_eq!(file_key_stanza.body, file_key, "recovered file key must match");
+    }
+
+    /// A stanza encrypted to the *second* identity must still unwrap — the
+    /// recipient public key salts the HKDF, so pinning identities[0] would
+    /// make every other identity undecryptable.
+    #[test]
+    fn identity_v1_tries_every_identity() {
+        let scalar = StaticSecret::random_from_rng(rand::rngs::OsRng);
+        let recipient_public = PublicKey::from(&scalar).to_bytes();
+        let other_public =
+            PublicKey::from(&StaticSecret::random_from_rng(rand::rngs::OsRng)).to_bytes();
+        let file_key = [0x22u8; age::FILE_KEY_LEN];
+
+        let (share, body) = age::wrap_file_key(&recipient_public, &file_key).unwrap();
+        let share_b64 = STANDARD_NO_PAD.encode(share);
+        let body_b64 = STANDARD_NO_PAD.encode(&body);
+
+        let mut input = String::new();
+        let decoy = age::encode_identity(&other_public).unwrap();
+        let matching = age::encode_identity(&recipient_public).unwrap();
+        input.push_str(&format!("-> add-identity {decoy}\n\n"));
+        input.push_str(&format!("-> add-identity {matching}\n\n"));
+        input.push_str(&format!("-> recipient-stanza 0 {STANZA_TYPE} {share_b64}\n"));
+        input.push_str(&body_b64);
+        input.push('\n');
+        input.push_str("-> done\n\n-> ok\n\n");
+
+        let mut output: Vec<u8> = Vec::new();
+        {
+            let mut io = StanzaIo::new(BufReader::new(input.as_bytes()), &mut output);
+            let ecdh = |share: &[u8; 32]| {
+                Ok(scalar.diffie_hellman(&PublicKey::from(*share)).to_bytes())
+            };
+            identity_v1(&mut io, ecdh).unwrap();
+        }
+
+        let mut reader = StanzaIo::new(BufReader::new(&output[..]), Vec::new());
+        let stanza = reader.read().unwrap();
+        assert_eq!(stanza.command, "file-key");
+        assert_eq!(stanza.args[0], "0");
+        assert_eq!(stanza.body, file_key, "recovered file key must match");
     }
 
     #[test]

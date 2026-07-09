@@ -29,15 +29,25 @@ enum PublicCardCache {
     /// cached decrypt slot (its `q` is the 0x40-prefixed compressed point).
     /// This is the material an age recipient/identity encodes.
     static func encryptionPublicKeyHex() -> String? {
-        guard let line = load(),
+        guard let key = publicKey(role: "decrypt", inResponseLine: load()) else { return nil }
+        return Hex.encode(key)
+    }
+
+    /// The raw 32-byte public key for the slot with the given role, parsed
+    /// out of a `pubkeys` response line: finds the slot, validates the
+    /// 0x40-prefixed 33-byte compressed point, and strips the prefix.
+    static func publicKey(role: String, inResponseLine line: String?) -> Data? {
+        guard let line,
               let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              object["ok"] as? Bool == true,
               let slots = object["slots"] as? [[String: Any]],
-              let decrypt = slots.first(where: { ($0["role"] as? String) == "decrypt" }),
-              let qHex = decrypt["q"] as? String,
-              qHex.count == 66, qHex.hasPrefix("40") else {
+              let slot = slots.first(where: { ($0["role"] as? String) == role }),
+              let qHex = slot["q"] as? String,
+              let q = Hex.decode(qHex),
+              q.count == 33, q.first == 0x40 else {
             return nil
         }
-        return String(qHex.dropFirst(2))
+        return Data(q.dropFirst())
     }
 
     /// Persist a `pubkeys` response line; ignores anything but a well-formed

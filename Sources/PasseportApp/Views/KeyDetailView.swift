@@ -46,6 +46,7 @@ private struct PublicKeySection: View {
             )
 
             KeyField(title: "SSH public key (OpenPGP auth subkey)", value: identity.ssh.publicKey)
+            KeyField(title: "OpenPGP fingerprint", value: identity.pgp.fingerprint, minHeight: 40)
             KeyField(title: "OpenPGP public key", value: identity.pgp.publicKey, minHeight: 180)
             KeyField(title: "age recipient (OpenPGP encryption subkey)", value: identity.age.recipient)
         }
