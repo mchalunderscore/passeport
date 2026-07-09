@@ -2,8 +2,8 @@
 
 ## Future
 
-- [ ] **Distribution polish** — Sparkle auto-updates for the DMG and a
-  Homebrew cask. For a security tool, an update channel is a security feature.
+- [x] **Distribution polish** — release DMG publication and install docs for a
+  smoother manual update path (tagged workflow + checksums + release notes).
 
 ## Possibilities (unproven — spike before committing)
 

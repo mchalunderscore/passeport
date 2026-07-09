@@ -56,23 +56,55 @@ or run it.
 ## Packaging a release DMG
 
 `scripts/make-dmg.sh` builds `Passeport.app` and packages it into
-`dist/Passeport.dmg` (with a drag-to-`/Applications` symlink).
+`dist/Passeport.dmg` (with a drag-to-`/Applications` symlink) as an unsigned artifact.
 
 ```sh
 scripts/make-dmg.sh
 ```
 
-Then attach the DMG to a GitHub release:
+This flow intentionally avoids signing and notarization. Unsigned builds are
+fully functional; users will see a one-time Gatekeeper confirmation on first
+launch.
+
+For manual distribution workflows, the GitHub Action renames releases to:
+
+- `dist/Passeport-<version>.dmg`
+- `dist/Passeport-<version>.dmg.sha256`
 
 ```sh
-gh release create v0.1.0 dist/Passeport.dmg --title "Passeport 0.1.0" --notes "…"
+scripts/make-dmg.sh
+VERSION=0.1.0
+mv dist/Passeport.dmg dist/Passeport-$VERSION.dmg
+shasum -a 256 dist/Passeport-$VERSION.dmg > dist/Passeport-$VERSION.dmg.sha256
 ```
 
-The script also supports signing and notarizing via the `SIGN_IDENTITY` and
-`NOTARY_PROFILE` environment variables (see the header of
-[scripts/make-dmg.sh](scripts/make-dmg.sh)); an unsigned build is fully
-functional but shows a Gatekeeper warning on first launch (right-click →
-Open once).
+Attach the versioned files to a release:
+
+```sh
+gh release create v0.1.0 \
+  dist/Passeport-0.1.0.dmg \
+  dist/Passeport-0.1.0.dmg.sha256 \
+  --title "Passeport 0.1.0" \
+  --notes "…"
+```
+
+Release process:
+
+1. Run `scripts/make-dmg.sh` on a clean build machine.
+2. Tag the release commit (`git tag v0.1.0 && git push --tags`) or create the tag in your GitHub flow.
+3. The workflow builds and uploads `Passeport-<version>.dmg` + `.sha256`.
+4. In the release notes, include the checksum list and any migration notes.
+
+End-user install:
+
+1. Download `Passeport-<version>.dmg` from GitHub releases.
+2. Drag `Passeport.app` into `/Applications`.
+3. On first launch, confirm Gatekeeper’s one-time “Open” prompt.
+4. Verify checksum:
+
+```sh
+shasum -a 256 -c Passeport-<version>.dmg.sha256
+```
 
 ## Security Model
 
