@@ -160,6 +160,23 @@ pub fn derive_pgp_seed(prf: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>> {
     Ok(output)
 }
 
+/// HKDF `info` for the minisign-format Ed25519 signing key. A distinct domain
+/// from `PGP_INFO`, so this seed is cryptographically independent of the
+/// OpenPGP/SSH/age material even though it shares the same PRF and `HKDF_SALT`.
+pub const MINISIGN_INFO: &[u8] = b"passeport-minisign-v1";
+
+/// Derive the 32-byte Ed25519 seed for the minisign signing key from the PRF.
+/// Mirrors [`derive_pgp_seed`]; only the HKDF `info` differs, which is what
+/// keeps the two keys in separate domains. Deliberately independent of the
+/// OpenPGP RNG stream, so the frozen `SELFTEST_FINGERPRINT` is untouched.
+pub fn derive_minisign_seed(prf: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>> {
+    let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT), prf);
+    let mut output = Zeroizing::new([0u8; 32]);
+    hk.expand(MINISIGN_INFO, output.as_mut())
+        .map_err(|error| anyhow::anyhow!("failed to expand minisign key material: {error:?}"))?;
+    Ok(output)
+}
+
 fn pgp_epoch() -> Result<chrono::DateTime<chrono::Utc>> {
     chrono::Utc
         .timestamp_opt(KEY_CREATION_EPOCH, 0)

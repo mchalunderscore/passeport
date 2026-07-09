@@ -88,8 +88,14 @@ ikm  = root (HMAC output above)
 Current info labels:
 
 ```text
-passeport-pgp-v1 -> 32-byte ChaCha20 RNG seed for OpenPGP key generation
+passeport-pgp-v1      -> 32-byte ChaCha20 RNG seed for OpenPGP key generation
+passeport-minisign-v1 -> 32-byte Ed25519 seed for the minisign signing key
 ```
+
+Both share `salt = "passeport-passkey-v1"` and the same `root`; the distinct
+`info` labels make the two keys cryptographically independent (HKDF-Expand
+domain separation). Adding the minisign label does not touch the OpenPGP RNG
+stream, so all pre-existing keys are byte-identical.
 
 ## SSH
 
@@ -115,6 +121,40 @@ The creation timestamp is fixed at:
 OpenPGP determinism depends on the pinned `pgp` crate version and its RNG
 consumption order. Any dependency upgrade that changes output requires a v2
 contract or an explicit compatibility mode.
+
+## minisign
+
+A dedicated Ed25519 signing key is derived directly from `root` via HKDF-SHA256
+with `info = "passeport-minisign-v1"` (a separate domain from the OpenPGP tree —
+it is *not* one of the card slots). The 32-byte output is the Ed25519 seed.
+
+- **Key id** (`keynum`, 8 bytes) = the first 8 bytes of the raw Ed25519 public
+  key — deterministic, so the identity's minisign key id is stable across
+  devices.
+- Signatures are prehashed (`ED` / BLAKE2b-512), byte-compatible with
+  `jedisct1/minisign` and `rsign2`; the file signature and the trusted-comment
+  global signature are both bare Ed25519 over the standard minisign inputs.
+
+The private signing op runs through the same bridge as everything else (a
+`minisignsign` request, Touch ID / approval / audit gated); verification is
+fully public.
+
+## Self-contained gpg (Mode 2)
+
+The helper has a third front end, invoked as `passeport-core gpg …` (or under a
+`gpg`/`passeport-gpg` program name), that is a self-contained, pure-Rust `gpg`
+drop-in for the single Passeport identity — no GnuPG binary and no gpg-agent.
+It builds OpenPGP signatures with the `pgp` (rpgp) crate and delegates only the
+raw Ed25519 op to the app bridge (the existing `sign` request on `OPENPGP.1`),
+so the seed never enters the CLI. It signs the **same primary key** as the
+scdaemon path (identical fingerprint), so its signatures verify under standard
+`gpg`. It also clear-signs and inline-signs (same delegated signer), encrypts to
+its own cv25519 subkey (public, no bridge), and **decrypts** — the one operation
+that needs the private scalar, so it runs inside the gated `op` process (a
+`pgpdecrypt` request): that process reconstructs the full secret key from the
+seed and lets rpgp decrypt, returning only the plaintext. The seed never reaches
+the shim. This coexists with the scdaemon mode; the two are selected by which
+program git's `gpg.program` points at.
 
 ## Virtual smartcard (scdaemon mode)
 

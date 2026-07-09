@@ -278,6 +278,7 @@ enum GnuPGConfigurator {
         }
         let searchDirs = [
             "\(NSHomeDirectory())/.grimoire/profiles/current/bin",
+            "\(NSHomeDirectory())/.local/bin",
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "/usr/bin",

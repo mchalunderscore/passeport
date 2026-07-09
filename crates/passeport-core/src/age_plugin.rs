@@ -113,7 +113,11 @@ fn identity_v1<R: BufRead, W: Write>(
     }
 
     if identities.is_empty() {
-        io.write(&Stanza::message("error", &["identity", "0"], b"no identity"))?;
+        io.write(&Stanza::message(
+            "error",
+            &["identity", "0"],
+            b"no identity",
+        ))?;
         io.write(&Stanza::done())?;
         return Ok(());
     }
@@ -132,7 +136,11 @@ fn identity_v1<R: BufRead, W: Write>(
             let Ok(file_key) = age::unwrap_file_key(recipient_public, share, &shared, body) else {
                 continue;
             };
-            io.write(&Stanza::message("file-key", &[&file_index.to_string()], &file_key))?;
+            io.write(&Stanza::message(
+                "file-key",
+                &[&file_index.to_string()],
+                &file_key,
+            ))?;
             io.expect_ok()?;
             solved.insert(*file_index);
             break;
@@ -203,7 +211,10 @@ impl Stanza {
     }
 
     fn first_arg(&self) -> Result<&str> {
-        self.args.first().map(String::as_str).context("stanza missing argument")
+        self.args
+            .first()
+            .map(String::as_str)
+            .context("stanza missing argument")
     }
 }
 
@@ -244,9 +255,15 @@ impl<R: BufRead, W: Write> StanzaIo<R, W> {
         let body = if encoded.is_empty() {
             Vec::new()
         } else {
-            STANDARD_NO_PAD.decode(&encoded).context("invalid base64 body from age")?
+            STANDARD_NO_PAD
+                .decode(&encoded)
+                .context("invalid base64 body from age")?
         };
-        Ok(Stanza { command, args, body })
+        Ok(Stanza {
+            command,
+            args,
+            body,
+        })
     }
 
     fn write(&mut self, stanza: &Stanza) -> Result<()> {
@@ -328,7 +345,9 @@ mod tests {
         // --- identity-v1: age hands the stanza back to the plugin ---
         let mut dec_input = String::new();
         dec_input.push_str(&format!("-> add-identity {identity}\n\n"));
-        dec_input.push_str(&format!("-> recipient-stanza 0 {STANZA_TYPE} {share_b64}\n"));
+        dec_input.push_str(&format!(
+            "-> recipient-stanza 0 {STANZA_TYPE} {share_b64}\n"
+        ));
         dec_input.push_str(&body_b64);
         dec_input.push('\n');
         dec_input.push_str("-> done\n\n-> ok\n\n");
@@ -337,9 +356,8 @@ mod tests {
         {
             let mut io = StanzaIo::new(BufReader::new(dec_input.as_bytes()), &mut dec_output);
             // Local stand-in for the bridge: scalar · share.
-            let ecdh = |share: &[u8; 32]| {
-                Ok(scalar.diffie_hellman(&PublicKey::from(*share)).to_bytes())
-            };
+            let ecdh =
+                |share: &[u8; 32]| Ok(scalar.diffie_hellman(&PublicKey::from(*share)).to_bytes());
             identity_v1(&mut io, ecdh).unwrap();
         }
 
@@ -347,7 +365,10 @@ mod tests {
         let file_key_stanza = out_reader.read().unwrap();
         assert_eq!(file_key_stanza.command, "file-key");
         assert_eq!(file_key_stanza.args[0], "0");
-        assert_eq!(file_key_stanza.body, file_key, "recovered file key must match");
+        assert_eq!(
+            file_key_stanza.body, file_key,
+            "recovered file key must match"
+        );
     }
 
     /// A stanza encrypted to the *second* identity must still unwrap — the
@@ -370,7 +391,9 @@ mod tests {
         let matching = age::encode_identity(&recipient_public).unwrap();
         input.push_str(&format!("-> add-identity {decoy}\n\n"));
         input.push_str(&format!("-> add-identity {matching}\n\n"));
-        input.push_str(&format!("-> recipient-stanza 0 {STANZA_TYPE} {share_b64}\n"));
+        input.push_str(&format!(
+            "-> recipient-stanza 0 {STANZA_TYPE} {share_b64}\n"
+        ));
         input.push_str(&body_b64);
         input.push('\n');
         input.push_str("-> done\n\n-> ok\n\n");
@@ -378,9 +401,8 @@ mod tests {
         let mut output: Vec<u8> = Vec::new();
         {
             let mut io = StanzaIo::new(BufReader::new(input.as_bytes()), &mut output);
-            let ecdh = |share: &[u8; 32]| {
-                Ok(scalar.diffie_hellman(&PublicKey::from(*share)).to_bytes())
-            };
+            let ecdh =
+                |share: &[u8; 32]| Ok(scalar.diffie_hellman(&PublicKey::from(*share)).to_bytes());
             identity_v1(&mut io, ecdh).unwrap();
         }
 

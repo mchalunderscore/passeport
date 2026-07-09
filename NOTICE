@@ -1,0 +1,28 @@
+Passeport bundles the following third-party software in
+Passeport.app/Contents/Helpers. All are permissively licensed; Passeport ships
+no GPL-licensed binaries and no GNU tooling. The full upstream license texts are
+reproduced under Passeport.app/Contents/Resources/licenses/ (copied from each
+crate at bundle time); this file is a summary index.
+
+--------------------------------------------------------------------------------
+rage, rage-keygen — https://github.com/str4d/rage
+    Copyright (c) The rage Developers
+    Licensed under either of Apache License 2.0 or MIT license, at your option.
+    (age encryption; pure-Rust RustCrypto backend, no native crypto libraries.)
+
+--------------------------------------------------------------------------------
+passeport-core — this project
+    Copyright (c) Passeport authors
+    Licensed under the MIT license.
+    (Key derivation, the scdaemon dialect, the age plugin, the self-contained
+    `minisign` CLI (sign + verify), and the self-contained pure-Rust `gpg`
+    drop-in for Mode 2. No third-party gpg / minisign / rsign2 is bundled —
+    these are all implemented here.)
+
+--------------------------------------------------------------------------------
+Explicitly NOT bundled: sequoia-chameleon-gnupg. It is GPL-3.0-or-later, links
+native (L)GPL crypto (Nettle/GMP or OpenSSL), and requires an external GnuPG
+gpg-agent — so it cannot be part of a permissive, self-contained, GNU-free
+distribution. Passeport's OpenPGP support is provided instead by the pure-Rust
+`passeport-core gpg` drop-in (Mode 2), which delegates the private-key operation
+to the app over the Touch ID-gated bridge.

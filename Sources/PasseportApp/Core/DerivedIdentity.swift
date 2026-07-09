@@ -4,6 +4,19 @@ struct DerivedIdentity: Decodable, Equatable {
     let ssh: SSHIdentity
     let pgp: PGPIdentity
     let age: AgeIdentity
+    let minisign: MinisignIdentity
+}
+
+struct MinisignIdentity: Decodable, Equatable {
+    /// The full minisign public-key file contents (comment line + base64).
+    let publicKey: String
+    /// Hex of the 8-byte minisign key id.
+    let keyID: String
+
+    enum CodingKeys: String, CodingKey {
+        case publicKey = "public_key"
+        case keyID = "key_id"
+    }
 }
 
 struct SSHIdentity: Decodable, Equatable {
@@ -46,6 +59,9 @@ extension DerivedIdentity {
 
         ## age recipient (OpenPGP encryption subkey)
         \(age.recipient)
+
+        ## minisign public key (seed-derived Ed25519)
+        \(minisign.publicKey)
         """
     }
 

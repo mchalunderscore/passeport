@@ -69,6 +69,37 @@ struct OperationRequestMetadata {
                 requestJSON: decoded
             )
 
+        case "minisignsign":
+            // A seed-derived minisign signature. Classified `.sign` so it gets
+            // the same approval + Touch ID + audit gating as any private
+            // signing op (otherwise it would fall through to `.unknown` and be
+            // refused). `prehash` is the 64-byte BLAKE2b digest being signed.
+            let prehash = (decoded["prehash"] as? String).flatMap { Hex.decode($0) } ?? Data()
+            return OperationRequestMetadata(
+                kind: .sign,
+                keyref: "MINISIGN.1",
+                requestingClient: client?.isEmpty == false ? client! : defaultClient,
+                byteCount: prehash.count,
+                hexPreview: Hex.encode(prehash.prefix(24)),
+                summary: comment.isEmpty ? "create a minisign signature" : comment,
+                requestJSON: decoded
+            )
+
+        case "pgpdecrypt":
+            // OpenPGP message decryption via the Mode 2 gpg drop-in. Classified
+            // `.decrypt` so it gets the same approval + Touch ID + audit gating
+            // as the scdaemon `ecdh` path.
+            let ciphertext = (decoded["ciphertext"] as? String).flatMap { Hex.decode($0) } ?? Data()
+            return OperationRequestMetadata(
+                kind: .decrypt,
+                keyref: "OPENPGP.2",
+                requestingClient: client?.isEmpty == false ? client! : defaultClient,
+                byteCount: ciphertext.count,
+                hexPreview: Hex.encode(ciphertext.prefix(24)),
+                summary: comment.isEmpty ? "decrypt an OpenPGP message" : comment,
+                requestJSON: decoded
+            )
+
         case "pubkeys":
             return OperationRequestMetadata(
                 kind: .keyLookup,

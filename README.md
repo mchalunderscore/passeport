@@ -41,6 +41,20 @@ generated private keys stay in memory unless you explicitly export them.
 - Xcode with the Swift 6 toolchain.
 - Rust toolchain for the key helper.
 
+### External tools
+
+A release build bundles the permissive, pure-Rust **`rage`/`age`** (str4d/rage,
+MIT/Apache) into `Passeport.app/Contents/Helpers` for age encryption. Everything
+else is **Passeport's own** pure-Rust CLI in `passeport-core`: the `gpg` drop-in
+(Mode 2 OpenPGP) and the `minisign` command (sign + verify) — no third-party gpg,
+minisign, or rsign2 is shipped. So age encryption, minisign signing/verification,
+and GNU-free git signing work with nothing else installed.
+
+GNU `gpg` is needed **only** for the optional **Mode 1** smartcard bridge (which
+serves the identity into your existing `~/.gnupg`). If you want that path,
+provide `gpg`/`gpgconf` yourself (package manager, official installer, or
+`scripts/install-tooling.sh --gnupg`), keeping it on `PATH` or in `~/.local/bin`.
+
 ## Build
 
 Use Xcode:
@@ -55,16 +69,30 @@ or run it.
 
 ## Packaging a release DMG
 
-`scripts/make-dmg.sh` builds `Passeport.app` and packages it into
-`dist/Passeport.dmg` (with a drag-to-`/Applications` symlink) as an unsigned artifact.
+`scripts/make-dmg.sh` builds `Passeport.app`, **bundles the permissive toolchain**
+(`scripts/bundle-tooling.sh` vendors `rage` into `Contents/Helpers` with the
+`age→rage` name-symlink), and packages it into
+`dist/Passeport.dmg` (with a drag-to-`/Applications` symlink).
 
 ```sh
 scripts/make-dmg.sh
 ```
 
-This flow intentionally avoids signing and notarization. Unsigned builds are
-fully functional; users will see a one-time Gatekeeper confirmation on first
-launch.
+By default the artifact is **unsigned** and local-only — fully functional, with a
+one-time Gatekeeper confirmation on first launch. For real distribution, opt into
+hardened-runtime signing and notarization via env:
+
+```sh
+CODESIGN_IDENTITY="Developer ID Application: You (TEAMID)" \
+  NOTARIZE=1 NOTARY_PROFILE=my-notary-profile \
+  scripts/make-dmg.sh
+```
+
+`CODESIGN_IDENTITY` signs every bundled Mach-O (rage/passeport-core) with
+the hardened runtime and re-signs the app; `NOTARIZE=1` submits and staples.
+Bundling the universal binaries requires the `x86_64-apple-darwin` and
+`aarch64-apple-darwin` Rust targets (`rustup target add …`); with only one, a
+single-arch build is shipped.
 
 For manual distribution workflows, the GitHub Action renames releases to:
 
@@ -211,6 +239,33 @@ then `gpgconf --kill all`, `gpg --import passeport-public-keys.txt`, and
 **Set Up Git Commit Signing** points git at the same gpg and enables signing:
 `gpg.program`, `user.signingkey` (the primary fingerprint), `commit.gpgsign`,
 and `tag.gpgsign`. New commits and tags are then signed by the virtual card.
+
+## GNU-free OpenPGP, minisign, and age
+
+Beyond the Mode 1 smartcard bridge (which relies on your own GnuPG), Passeport
+ships a fully **GNU-free** stack. Every private-key operation still runs inside
+the app behind Touch ID; only public/framing work happens in the CLIs.
+
+- **GNU-free OpenPGP (Mode 2).** **Configure GNU-free OpenPGP** installs a
+  self-contained, pure-Rust `gpg` drop-in (built on the `pgp`/rpgp crate) and
+  points git's `gpg.program` at it. It signs commits and tags front-to-back with
+  **no GnuPG binary anywhere** — the raw Ed25519 op is delegated to the app over
+  the bridge — and the signatures it produces verify under standard `gpg` (so
+  GitHub's "Verified" badge works). Beyond detached signing it also **clear-signs,
+  encrypts to your own key, and decrypts** (decryption is Touch ID-gated through
+  the app, interoperating with messages real `gpg` encrypted to you). Run
+  `passeport-core gpg --help` for the full command list. It serves only the
+  Passeport identity; verifying third-party signatures, encrypting to anyone else,
+  or exporting secret keys is refused by design. Coexists with Mode 1 — pick
+  whichever you point git at.
+- **minisign.** **Set Up minisign Signing** derives a dedicated Ed25519 signing
+  key (its own HKDF domain) and installs a single pure-Rust `minisign` command.
+  Sign with `minisign -Sm <file>` (Touch ID-gated) and verify with
+  `minisign -Vm <file> -p <key>` — one command for both, no rsign2, no GNU tooling.
+  Anyone with your published public key can verify.
+- **age encryption.** **Set Up age Encryption** installs `age-plugin-passeport`;
+  the bundled `rage` (callable as `age`) encrypts to your recipient and decrypts
+  through the app.
 
 ### Backup & recovery
 

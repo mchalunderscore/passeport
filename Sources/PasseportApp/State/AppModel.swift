@@ -46,7 +46,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var bridgeRunning = false
     @Published private(set) var sshAgentRunning = false
     @Published private(set) var ageRecipient: String?
+    @Published private(set) var minisignPublicKeyPath: String?
+    @Published private(set) var gnuFreeGPGReady = false
     @Published var backgroundLauncherInstalled = LaunchAgentInstaller.isInstalled
+    @Published private(set) var hasLocalGnuPG = false
+    @Published private(set) var hasLocalAge = false
     @Published var recoveryPhrase: String?
     @Published private(set) var contractWarning: String?
     @Published private(set) var gnupgStubWarning: String?
@@ -124,6 +128,7 @@ final class AppModel: ObservableObject {
         let storedMinutes = UserDefaults.standard.integer(forKey: Self.autoLockIdleMinutesKey)
         autoLockIdleMinutes = storedMinutes > 0 ? storedMinutes : 10
 
+        refreshLocalToolingAvailability()
         applyBridgePolicy()
         applySeedStoragePolicy()
         setupAutoLockMonitoring()
@@ -144,6 +149,19 @@ final class AppModel: ObservableObject {
 
     private static var defaultPGPUserID: String {
         "\(NSUserName()) <\(NSUserName())@localhost>"
+    }
+
+    private func refreshLocalToolingAvailability() {
+        // Resolving the login-shell PATH spawns a shell (cached after the first
+        // call), so do it off the main thread to keep launch responsive.
+        Task.detached(priority: .utility) { [weak self] in
+            let gnupg = ToolingInstaller.hasGnuPG
+            let age = ToolingInstaller.hasRageOrAge
+            await MainActor.run {
+                self?.hasLocalGnuPG = gnupg
+                self?.hasLocalAge = age
+            }
+        }
     }
 
     private static func loadPGPUserID() -> String {
@@ -442,6 +460,10 @@ final class AppModel: ObservableObject {
             status = "Derive keys first, then set up age"
             return
         }
+        guard ToolingInstaller.hasRageOrAge, let agePath = ToolingInstaller.ragePath else {
+            status = "Provide a `rage` binary (or `age`) on PATH before configuring age encryption."
+            return
+        }
         runBusy("Configuring age encryption") { [self] in
             // The plugin decrypts through the bridge, so make sure it is up.
             if !(await ScdBridge.shared.isRunning) {
@@ -461,7 +483,71 @@ final class AppModel: ObservableObject {
                 )
             }.value
             self.ageRecipient = result.recipient
-            self.status = "age ready — encrypt with `age -r \(result.recipient)`, decrypt with `age -d -i \(result.identityFilePath)`"
+            self.status = "\(agePath) ready — encrypt with `\(agePath) -r \(result.recipient)`, decrypt with `\(agePath) -d -i \(result.identityFilePath)`"
+        }
+    }
+
+    /// Install the minisign signing shim and write the public-key file. Signing
+    /// is seed-derived and routes through the bridge (Touch ID-gated); no
+    /// external binary is needed — the installed `minisign` signs and verifies.
+    func configureMinisign() {
+        guard let identity else {
+            status = "Derive keys first, then set up minisign signing"
+            return
+        }
+        runBusy("Configuring minisign signing") { [self] in
+            if !(await ScdBridge.shared.isRunning) {
+                try await ScdBridge.shared.start()
+                self.bridgeRunning = true
+            }
+            let helperPath = try CoreLocator.helperURL().path
+            let socketPath = ScdBridge.socketURL.path
+            let publicKeyFile = identity.minisign.publicKey
+            let result: MinisignConfigurator.Result = try await Task.detached(priority: .userInitiated) {
+                try MinisignConfigurator.configure(
+                    publicKeyFile: publicKeyFile,
+                    helperPath: helperPath,
+                    socketPath: socketPath
+                )
+            }.value
+            self.minisignPublicKeyPath = result.publicKeyPath
+            self.status = "minisign ready — sign with `minisign -Sm <file>`, verify with `minisign -Vm <file> -p \(result.publicKeyPath)`"
+        }
+    }
+
+    /// Configure GNU-free OpenPGP (Mode 2): install the self-contained gpg
+    /// drop-in wrapper and point git commit/tag signing at it. Coexists with
+    /// Mode 1 (scdaemon + the user's real gpg); this path uses no GnuPG binary.
+    func configureGnuFreeGPG() {
+        guard let identity else {
+            status = "Derive keys first, then set up GNU-free OpenPGP"
+            return
+        }
+        runBusy("Configuring GNU-free OpenPGP (Mode 2)") { [self] in
+            if !(await ScdBridge.shared.isRunning) {
+                try await ScdBridge.shared.start()
+                self.bridgeRunning = true
+            }
+            let helperPath = try CoreLocator.helperURL().path
+            let socketPath = ScdBridge.socketURL.path
+            let publicKey = identity.pgp.publicKey
+            let fingerprint = identity.pgp.fingerprint
+            let result: GnuFreeGPGConfigurator.Result = try await Task.detached(priority: .userInitiated) {
+                let configured = try GnuFreeGPGConfigurator.configure(
+                    publicKeyArmored: publicKey,
+                    helperPath: helperPath,
+                    socketPath: socketPath
+                )
+                // Point git at the Mode 2 wrapper — GNU-free commit signing.
+                _ = try GitConfigurator.configure(
+                    fingerprint: fingerprint,
+                    gpgPath: configured.gpgProgramPath
+                )
+                return configured
+            }.value
+            self.gnuFreeGPGReady = true
+            self.status =
+                "GNU-free OpenPGP ready — git signs commits via \(result.gpgProgramPath), no GnuPG needed"
         }
     }
 
@@ -510,6 +596,10 @@ final class AppModel: ObservableObject {
     func configureGnuPG() {
         guard let identity else {
             status = "Derive keys first, then configure GnuPG"
+            return
+        }
+        guard ToolingInstaller.hasGnuPG else {
+            status = "Provide `gpg` on PATH before configuring GnuPG."
             return
         }
         runBusy("Configuring GnuPG") { [self] in
@@ -624,6 +714,10 @@ final class AppModel: ObservableObject {
     func configureGitSigning() {
         guard let identity else {
             status = "Derive keys first, then set up git signing"
+            return
+        }
+        guard ToolingInstaller.hasGnuPG else {
+            status = "Provide `gpg` on PATH before configuring git signing."
             return
         }
         runBusy("Configuring git commit signing") {

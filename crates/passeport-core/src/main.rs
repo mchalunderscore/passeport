@@ -1,7 +1,11 @@
-mod identity;
-mod ops;
 mod age;
 mod age_plugin;
+mod gpg;
+mod identity;
+mod minisign;
+mod minisign_cli;
+mod ops;
+mod pgp_sign;
 mod scd;
 
 use std::io::{self, Read};
@@ -31,6 +35,15 @@ struct DeriveResponse {
     ssh: SshOutput,
     pgp: PgpOutput,
     age: AgeOutput,
+    minisign: MinisignOutput,
+}
+
+#[derive(Debug, Serialize)]
+struct MinisignOutput {
+    /// The full minisign public-key file contents (comment line + base64).
+    public_key: String,
+    /// Hex of the 8-byte minisign key id.
+    key_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,9 +64,26 @@ struct PgpOutput {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    // When invoked under a `gpg`/`passeport-gpg` name (Mode 2), behave as the
+    // self-contained OpenPGP CLI — git calls this binary as plain `gpg`.
+    let prog = args
+        .first()
+        .and_then(|p| std::path::Path::new(p).file_name())
+        .and_then(|f| f.to_str())
+        .unwrap_or("");
+    if matches!(prog, "gpg" | "gpg2" | "passeport-gpg") {
+        std::process::exit(gpg::run(&args[1..]));
+    }
+    // Invoked under a `minisign`/`passeport-minisign` name: the unified minisign
+    // CLI (sign via the bridge, verify in-process).
+    if matches!(prog, "minisign" | "passeport-minisign") {
+        std::process::exit(minisign_cli::run(&args[1..]));
+    }
+
     // age invokes the plugin as `age-plugin-passeport --age-plugin=<state>`.
     // We ship that name as a symlink to this binary, so dispatch on the flag.
-    let args: Vec<String> = std::env::args().collect();
     if let Some(state) = args.iter().find_map(|a| a.strip_prefix("--age-plugin=")) {
         if let Err(error) = age_plugin::run(state) {
             eprintln!("{error:#}");
@@ -64,6 +94,8 @@ fn main() {
 
     let mode = std::env::args().nth(1);
     let result = match mode.as_deref() {
+        // Explicit `passeport-core gpg …` form, for testing without a symlink.
+        Some("gpg") => std::process::exit(gpg::run(&args[2..])),
         Some("scd") => scd::serve(),
         Some("op") => ops::run_op(),
         Some("mnemonic-encode") => run_mnemonic_encode(),
@@ -71,6 +103,7 @@ fn main() {
         Some("revoke") => run_revoke(),
         Some("selftest") => run_selftest(),
         Some("age-recipient") => run_age_recipient(),
+        Some("minisign") => std::process::exit(minisign_cli::run(&args[2..])),
         None => run(),
         Some(other) => Err(anyhow::anyhow!("unknown mode: {other}")),
     };
@@ -120,6 +153,11 @@ fn derive_response(request: &DeriveRequest) -> Result<DeriveResponse> {
     // The age recipient is the encryption subkey's X25519 public key.
     let age_recipient = age::encode_recipient(&encryption_subkey_public(&signed_key)?)?;
 
+    // The minisign signing key is seed-derived but a separate HKDF domain, not
+    // one of the OpenPGP slots — so it is computed straight from the PRF here.
+    let minisign_seed = identity::derive_minisign_seed(&prf)?;
+    let minisign_public = minisign::public_key_from_seed(&minisign_seed);
+
     Ok(DeriveResponse {
         ssh: SshOutput {
             public_key: ssh_public
@@ -133,6 +171,13 @@ fn derive_response(request: &DeriveRequest) -> Result<DeriveResponse> {
         },
         age: AgeOutput {
             recipient: age_recipient,
+        },
+        minisign: MinisignOutput {
+            public_key: minisign::public_key_file(
+                &minisign_public,
+                &format!("minisign public key for {}", request.user_id),
+            ),
+            key_id: hex::encode(minisign::key_id(&minisign_public)),
         },
     })
 }

@@ -28,3 +28,4 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 bip39 = { version = "2.2.2", default-features = false, features = ["std"] }
 bech32 = "0.11"
 chacha20poly1305 = "0.10"
+blake2 = "0.10"

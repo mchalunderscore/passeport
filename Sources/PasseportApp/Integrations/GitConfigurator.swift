@@ -37,6 +37,10 @@ enum GitConfigurator {
     static func configure(fingerprint: String, gpgPath: String) throws -> Result {
         let git = try locateGit()
         let settings = [
+            // Reset the format to openpgp: a prior "SSH signing" setup leaves
+            // gpg.format=ssh, which would ignore gpg.program and misread the
+            // fingerprint as an SSH key, silently breaking commit signing.
+            ("gpg.format", "openpgp"),
             ("gpg.program", gpgPath),
             ("user.signingkey", fingerprint),
             ("commit.gpgsign", "true"),

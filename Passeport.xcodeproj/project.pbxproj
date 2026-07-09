@@ -28,6 +28,9 @@
 		01F001000000000000000020 /* SSHAgentServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000020 /* SSHAgentServer.swift */; };
 		01F001000000000000000030 /* SSHConfigurator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000030 /* SSHConfigurator.swift */; };
 		01F001000000000000000031 /* AgeConfigurator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000031 /* AgeConfigurator.swift */; };
+		01F001000000000000000040 /* ToolingInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000040 /* ToolingInstaller.swift */; };
+		01F001000000000000000041 /* MinisignConfigurator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000041 /* MinisignConfigurator.swift */; };
+		01F001000000000000000042 /* GnuFreeGPGConfigurator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000042 /* GnuFreeGPGConfigurator.swift */; };
 		01F001000000000000000021 /* ClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000021 /* ClassificationTests.swift */; };
 		01F001000000000000000022 /* GnuPGConfiguratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F000000000000000000022 /* GnuPGConfiguratorTests.swift */; };
 		90CC102A2FFD5BE1009F3881 /* SeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90CC10292FFD5BE1009F3881 /* SeedStore.swift */; };
@@ -70,6 +73,9 @@
 		01F000000000000000000020 /* SSHAgentServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAgentServer.swift; sourceTree = "<group>"; };
 		01F000000000000000000030 /* SSHConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConfigurator.swift; sourceTree = "<group>"; };
 		01F000000000000000000031 /* AgeConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgeConfigurator.swift; sourceTree = "<group>"; };
+		01F000000000000000000040 /* ToolingInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolingInstaller.swift; sourceTree = "<group>"; };
+		01F000000000000000000041 /* MinisignConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinisignConfigurator.swift; sourceTree = "<group>"; };
+		01F000000000000000000042 /* GnuFreeGPGConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnuFreeGPGConfigurator.swift; sourceTree = "<group>"; };
 		01F00000000000000000001D /* OperationAuditLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationAuditLog.swift; sourceTree = "<group>"; };
 		01F000000000000000000021 /* ClassificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassificationTests.swift; sourceTree = "<group>"; };
 		01F000000000000000000022 /* GnuPGConfiguratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GnuPGConfiguratorTests.swift; sourceTree = "<group>"; };
@@ -227,6 +233,9 @@
 				01F000000000000000000031 /* AgeConfigurator.swift */,
 				01F000000000000000000015 /* GitConfigurator.swift */,
 				01F000000000000000000016 /* LaunchAgentInstaller.swift */,
+				01F000000000000000000040 /* ToolingInstaller.swift */,
+				01F000000000000000000041 /* MinisignConfigurator.swift */,
+				01F000000000000000000042 /* GnuFreeGPGConfigurator.swift */,
 			);
 			path = Integrations;
 			sourceTree = "<group>";
@@ -356,6 +365,9 @@
 				01F001000000000000000020 /* SSHAgentServer.swift in Sources */,
 				01F001000000000000000030 /* SSHConfigurator.swift in Sources */,
 				01F001000000000000000031 /* AgeConfigurator.swift in Sources */,
+				01F001000000000000000040 /* ToolingInstaller.swift in Sources */,
+				01F001000000000000000041 /* MinisignConfigurator.swift in Sources */,
+				01F001000000000000000042 /* GnuFreeGPGConfigurator.swift in Sources */,
 				01F001000000000000000012 /* GnuPGConfigurator.swift in Sources */,
 				01F001000000000000000013 /* SeedBackup.swift in Sources */,
 				01F001000000000000000014 /* DeterminismCheck.swift in Sources */,

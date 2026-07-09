@@ -47,6 +47,31 @@ pub enum Request {
         #[serde(default)]
         comment: Option<String>,
     },
+    /// Assemble a full minisign signature file with the seed-derived minisign
+    /// key. `prehash` is the 64-byte BLAKE2b-512 digest of the message, computed
+    /// publicly by the caller; the gated process signs it and the trusted
+    /// comment. Handled in `run_op` (needs the minisign key, not the pgp seed).
+    MinisignSign {
+        #[serde(with = "hex_bytes")]
+        prehash: Vec<u8>,
+        trusted_comment: String,
+        untrusted_comment: String,
+        #[serde(default)]
+        client: Option<String>,
+        #[serde(default)]
+        comment: Option<String>,
+    },
+    /// Decrypt an OpenPGP message encrypted to our cv25519 encryption subkey.
+    /// Handled in `run_op`, where the full secret key is reconstructed from the
+    /// seed; the seed never reaches the shim.
+    PgpDecrypt {
+        #[serde(with = "hex_bytes")]
+        ciphertext: Vec<u8>,
+        #[serde(default)]
+        client: Option<String>,
+        #[serde(default)]
+        comment: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -65,6 +90,15 @@ pub enum Response {
         ok: bool,
         #[serde(with = "hex_bytes")]
         shared: Vec<u8>,
+    },
+    Minisign {
+        ok: bool,
+        signature_file: String,
+    },
+    PgpDecrypt {
+        ok: bool,
+        #[serde(with = "hex_bytes")]
+        plaintext: Vec<u8>,
     },
     Error {
         ok: bool,
@@ -162,6 +196,15 @@ pub fn handle(seed: &[u8; 32], user_id: &str, request: &Request) -> Result<Respo
                 shared: shared.as_bytes().to_vec(),
             })
         }
+        Request::MinisignSign { .. } => {
+            // Needs the minisign key (a separate HKDF domain), which `handle`
+            // does not hold — `run_op` derives it from the PRF and handles this.
+            bail!("minisign signing must be routed through run_op, not handle()")
+        }
+        Request::PgpDecrypt { .. } => {
+            // Reconstructs the full secret key; routed through run_op.
+            bail!("pgp decrypt must be routed through run_op, not handle()")
+        }
     }
 }
 
@@ -188,18 +231,83 @@ pub fn run_op() -> Result<()> {
         serde_json::from_str(&input).context("failed to parse op request json")?;
 
     let prf = identity::decode_prf(&envelope.prf)?;
-    let seed = identity::derive_pgp_seed(&prf)?;
 
-    let response = match handle(&seed, &envelope.user_id, &envelope.request) {
-        Ok(response) => response,
-        Err(error) => Response::Error {
-            ok: false,
-            error: format!("{error:#}"),
+    // Minisign uses its own seed domain and skips the (expensive) OpenPGP key
+    // generation; everything else goes through the shared `handle` choke point.
+    let response = match &envelope.request {
+        Request::MinisignSign {
+            prehash,
+            trusted_comment,
+            untrusted_comment,
+            ..
+        } => match run_minisign_sign(&prf, prehash, trusted_comment, untrusted_comment) {
+            Ok(signature_file) => Response::Minisign {
+                ok: true,
+                signature_file,
+            },
+            Err(error) => Response::Error {
+                ok: false,
+                error: format!("{error:#}"),
+            },
         },
+        Request::PgpDecrypt { ciphertext, .. } => {
+            match run_pgp_decrypt(&prf, &envelope.user_id, ciphertext) {
+                Ok(plaintext) => Response::PgpDecrypt {
+                    ok: true,
+                    plaintext,
+                },
+                Err(error) => Response::Error {
+                    ok: false,
+                    error: format!("{error:#}"),
+                },
+            }
+        }
+        request => {
+            let seed = identity::derive_pgp_seed(&prf)?;
+            match handle(&seed, &envelope.user_id, request) {
+                Ok(response) => response,
+                Err(error) => Response::Error {
+                    ok: false,
+                    error: format!("{error:#}"),
+                },
+            }
+        }
     };
     let line = serde_json::to_string(&response).context("failed to encode op response")?;
     println!("{line}");
     Ok(())
+}
+
+/// Sign a minisign signature file with the seed-derived minisign key. Runs only
+/// inside the gated `op` process (which holds the PRF), never in the CLI shim.
+fn run_minisign_sign(
+    prf: &[u8; 32],
+    prehash: &[u8],
+    trusted_comment: &str,
+    untrusted_comment: &str,
+) -> Result<String> {
+    if prehash.len() != 64 {
+        bail!("minisign prehash must be 64 bytes (BLAKE2b-512)");
+    }
+    let seed = identity::derive_minisign_seed(prf)?;
+    let signer = SigningKey::from_bytes(&seed);
+    let mut digest = [0u8; 64];
+    digest.copy_from_slice(prehash);
+    crate::minisign::sign_prehashed(&signer, &digest, trusted_comment, untrusted_comment)
+}
+
+/// Decrypt an OpenPGP message with the seed-reconstructed secret key. Runs only
+/// inside the gated `op` process; the seed never reaches the CLI shim.
+fn run_pgp_decrypt(prf: &[u8; 32], user_id: &str, ciphertext: &[u8]) -> Result<Vec<u8>> {
+    let seed = identity::derive_pgp_seed(prf)?;
+    let key = identity::generate_signed_key(&seed, user_id)?;
+    let message = crate::pgp_sign::parse_message(ciphertext)?;
+    let (decrypted, _key_ids) = message
+        .decrypt(String::new, &[&key])
+        .context("failed to decrypt the message")?;
+    decrypted
+        .get_content()?
+        .context("the decrypted message had no content")
 }
 
 /// Hex (de)serialization for `Vec<u8>` fields on the wire.
@@ -259,6 +367,25 @@ mod tests {
         let verifying = VerifyingKey::from_bytes(&pk).unwrap();
         let signature = Signature::from_bytes(&sig.try_into().unwrap());
         verifying.verify(data, &signature).unwrap();
+    }
+
+    #[test]
+    fn minisign_sign_via_run_op_verifies() {
+        let prf = [7u8; 32];
+        let message = b"release-v1.2.3.tar.gz contents";
+        let digest = crate::minisign::prehash(message);
+        let signature_file =
+            run_minisign_sign(&prf, &digest, "timestamp:1767225600", "passeport").unwrap();
+
+        let ms_seed = identity::derive_minisign_seed(&prf).unwrap();
+        let public = crate::minisign::public_key_from_seed(&ms_seed);
+        let pubkey_file = crate::minisign::public_key_file(&public, "passeport");
+        crate::minisign::verify(&pubkey_file, &signature_file, message).unwrap();
+    }
+
+    #[test]
+    fn minisign_rejects_short_prehash() {
+        assert!(run_minisign_sign(&[7u8; 32], &[0u8; 32], "tc", "uc").is_err());
     }
 
     #[test]

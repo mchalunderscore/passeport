@@ -57,16 +57,35 @@ enum AgeConfigurator {
         """
         try script.write(to: plugin, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: plugin.path)
+        let pluginLink = try installPluginLink(at: plugin)
 
         let identityFile = try writeIdentityFile(in: dir, recipient: recipient, identity: identity)
 
         return Result(
             pluginPath: plugin.path,
-            binDirectory: dir.path,
+            binDirectory: pluginLink.deletingLastPathComponent().path,
             recipient: recipient,
             identity: identity,
             identityFilePath: identityFile.path
         )
+    }
+
+    private static func installPluginLink(at plugin: URL) throws -> URL {
+        let localBin = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: localBin, withIntermediateDirectories: true)
+        let linkedPlugin = localBin.appendingPathComponent(plugin.lastPathComponent)
+
+        if FileManager.default.fileExists(atPath: linkedPlugin.path) {
+            try FileManager.default.removeItem(at: linkedPlugin)
+        }
+
+        try FileManager.default.createSymbolicLink(
+            at: linkedPlugin,
+            withDestinationURL: plugin
+        )
+
+        return linkedPlugin
     }
 
     /// Write the identity file `age -d -i` points at. The identity string is

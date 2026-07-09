@@ -169,11 +169,13 @@ impl CryptoBackend for SocketBackend {
             keyref: keyref.to_owned(),
             data: data.to_vec(),
             client: Some(Self::client_name().to_owned()),
-            comment: Some(match keyref {
-                "OPENPGP.3" => "ssh authentication",
-                _ => Self::request_comment("sign"),
-            }
-            .to_owned()),
+            comment: Some(
+                match keyref {
+                    "OPENPGP.3" => "ssh authentication",
+                    _ => Self::request_comment("sign"),
+                }
+                .to_owned(),
+            ),
         })? {
             Response::Sign { sig, .. } => Ok(sig),
             Response::Error { error, .. } => bail!(error),
