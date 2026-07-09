@@ -15,17 +15,23 @@ them would change every derived key.
 ## Input
 
 The root secret is a random 32-byte seed stored **device-local** as a
-generic-password item in the file-based (login) keychain (service
-`passeport.seed`, account `default`). It is not synchronizable and never leaves
-the machine; the portable form is its 24-word BIP39 encoding (the seed *is* the
-mnemonic entropy — see Recovery phrase below). The root input keying material
-is derived from it:
+generic-password item in the macOS data-protection keychain, user-presence
+protected (service `passeport.seed.secure`, account `default`). It is not
+synchronizable and never leaves the machine; the portable form is its 24-word
+BIP39 encoding (the seed *is* the mnemonic entropy — see Recovery phrase below).
+
+An **optional passphrase** ("25th word") can stretch the seed into the
+effective root material before the PRF (see Passphrase below). Without a
+passphrase the effective material *is* the seed, so this section and everything
+below are byte-identical to the pre-passphrase contract. The root input keying
+material is:
 
 ```text
-root = HMAC-SHA256(key = seed, data = "passeport root v1")
+root = HMAC-SHA256(key = effective_material, data = "passeport root v1")
 ```
 
-The 32-byte HMAC output is not stored on disk.
+where `effective_material = seed` with no passphrase. The 32-byte HMAC output is
+not stored on disk.
 
 ## Recovery phrase
 
@@ -35,6 +41,40 @@ phrase is the identity's backup and its cross-device portability: restoring the
 phrase on another Mac writes back the same seed and reproduces every derived
 key. The phrase format is BIP39-interoperable, but the keys derived from it are
 Ed25519/Curve25519, unrelated to a wallet's secp256k1 keys.
+
+## Passphrase ("25th word")
+
+An optional passphrase domain-separates the identity so the 24-word phrase
+alone is no longer sufficient. It is **never stored** — it is entered per
+unlock (prompted alongside Touch ID at derive/restore, cached in memory until
+auto-lock) and mixed with the seed *in the app*, before the PRF, so the Rust
+helper's contract is untouched.
+
+```text
+effective_material =
+    seed                                              if passphrase is empty
+    PBKDF2-HMAC-SHA512(                                otherwise
+        password   = utf8(passphrase),
+        salt       = "passeport-25th-word-v1" || seed,
+        iterations = 210000,
+        dkLen      = 32)
+```
+
+`effective_material` replaces `seed` as the HMAC key in the root step above.
+An empty passphrase yields `effective_material = seed`, keeping existing
+(no-passphrase) identities byte-identical — the passphrase is a strictly
+additive, opt-in layer, chosen at identity creation or restore.
+
+To catch a mistyped passphrase (which would otherwise silently derive a
+*different* valid identity), a public verifier is stored locally and checked
+before keys are derived:
+
+```text
+verifier = HMAC-SHA256(key = effective_material, data = "passeport-passphrase-verifier-v1")
+```
+
+The verifier is a one-way commitment to the correct material; it reveals no
+more than the (already public) derived keys and never the passphrase.
 
 ## Expansion
 

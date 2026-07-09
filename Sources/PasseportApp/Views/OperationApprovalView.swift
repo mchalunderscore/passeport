@@ -98,6 +98,89 @@ enum OperationApproval {
     }
 }
 
+/// Shows the passphrase-unlock panel modally and returns the entered
+/// passphrase, or nil if the user cancelled. Used when a private operation
+/// needs a passphrase identity that isn't unlocked yet.
+@MainActor
+enum PassphraseUnlock {
+    static func present(errorMessage: String?) -> String? {
+        let window = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 140),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        window.isMovableByWindowBackground = true
+        window.level = .modalPanel
+
+        var result: String?
+        let view = PassphrasePromptView(errorMessage: errorMessage) { entered in
+            result = entered
+            NSApp.stopModal()
+        }
+        let hosting = NSHostingView(rootView: view)
+        hosting.setFrameSize(hosting.fittingSize)
+        window.setContentSize(hosting.fittingSize)
+        window.contentView = hosting
+        window.center()
+
+        let previousApp = NSWorkspace.shared.frontmostApplication
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.runModal(for: window)
+        window.orderOut(nil)
+
+        if let previousApp,
+           previousApp.processIdentifier != NSRunningApplication.current.processIdentifier {
+            previousApp.activate(from: .current)
+        }
+        return result
+    }
+}
+
+private struct PassphrasePromptView: View {
+    let errorMessage: String?
+    /// nil = cancelled, non-nil = the entered passphrase.
+    let onComplete: (String?) -> Void
+    @State private var passphrase = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Passphrase required", systemImage: "key.horizontal.fill")
+                .font(.headline)
+            Text("This identity is protected by a passphrase. Enter it to unlock for this operation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            SecureField("Passphrase", text: $passphrase)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onSubmit { if !passphrase.isEmpty { onComplete(passphrase) } }
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            HStack {
+                Button("Cancel", role: .cancel) { onComplete(nil) }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Unlock") { onComplete(passphrase) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(passphrase.isEmpty)
+            }
+        }
+        .padding(18)
+        .frame(width: 360)
+        .panelChrome()
+        .onAppear { focused = true }
+    }
+}
+
 private extension View {
     /// Rounded Liquid Glass chrome for the borderless approval panel on
     /// macOS 26, with a material fallback on older systems.

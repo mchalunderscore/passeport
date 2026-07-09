@@ -1,3 +1,4 @@
+import CommonCrypto
 import CryptoKit
 import Foundation
 import Security
@@ -26,6 +27,9 @@ enum SeedStore {
     private nonisolated static let account = "default"
     private nonisolated static let expectedSeedLength = 32
     private static var cachedSeed: Data?
+    /// The effective key material for the PRF: the raw seed for a no-passphrase
+    /// identity, or the passphrase-stretched value otherwise. Cached until lock.
+    private static var cachedMaterial: Data?
     private nonisolated static let keychainPrompt = "unlock the Passeport root secret"
     private static let authenticationContext: LAContext = {
         let context = LAContext()
@@ -34,12 +38,123 @@ enum SeedStore {
         return context
     }()
 
-    /// HMAC-SHA256 over `salt` keyed with the seed. Stands in for the original
-    /// WebAuthn PRF; see DERIVATION.md.
+    // MARK: - Passphrase ("25th word")
+
+    /// PBKDF2 domain-separation label for the passphrase-stretched material.
+    private nonisolated static let passphraseSaltPrefix = Data("passeport-25th-word-v1".utf8)
+    /// HMAC label for the public verifier that catches a wrong passphrase.
+    private nonisolated static let verifierInfo = Data("passeport-passphrase-verifier-v1".utf8)
+    /// OWASP-recommended floor for PBKDF2-HMAC-SHA512.
+    private nonisolated static let passphraseRounds: UInt32 = 210_000
+    private nonisolated static let passphraseEnabledKey = "PasseportPassphraseEnabled"
+    private nonisolated static let passphraseVerifierKey = "PasseportPassphraseVerifier"
+
+    /// True when this identity requires a passphrase to derive.
+    nonisolated static func passphraseEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: passphraseEnabledKey)
+    }
+
+    /// True when a passphrase is required but no session material is unlocked
+    /// yet — the caller must collect it and call `unlock(passphrase:)`.
+    static func needsPassphrase() -> Bool {
+        passphraseEnabled() && cachedMaterial == nil
+    }
+
+    /// HMAC-SHA256 over `salt` keyed with the effective material. Stands in for
+    /// the original WebAuthn PRF; see DERIVATION.md.
     static func prf(salt: Data) async throws -> Data {
-        let seed = try await unlockedSeed()
-        let mac = HMAC<SHA256>.authenticationCode(for: salt, using: SymmetricKey(data: seed))
+        let material = try await unlockedMaterial()
+        let mac = HMAC<SHA256>.authenticationCode(for: salt, using: SymmetricKey(data: material))
         return Data(mac)
+    }
+
+    /// The effective PRF material. For a no-passphrase identity this is the raw
+    /// seed and unlocks transparently behind Touch ID. For a passphrase
+    /// identity it must have been established via `unlock(passphrase:)`;
+    /// otherwise this throws so the caller can prompt.
+    private static func unlockedMaterial() async throws -> Data {
+        if let cachedMaterial {
+            return cachedMaterial
+        }
+        if passphraseEnabled() {
+            throw PasseportError.passphraseRequired
+        }
+        let seed = try await unlockedSeed()
+        cachedMaterial = seed
+        return seed
+    }
+
+    /// Establish the session material for a passphrase identity: read the seed
+    /// (Touch ID), stretch it with `passphrase`, and verify against the stored
+    /// public commitment so a mistyped passphrase is rejected up front rather
+    /// than silently deriving a different identity.
+    static func unlock(passphrase: String) async throws {
+        let seed = try await unlockedSeed()
+        let material = deriveMaterial(seed: seed, passphrase: passphrase)
+        if let expected = storedVerifier() {
+            guard verifier(for: material) == expected else {
+                throw PasseportError.incorrectPassphrase
+            }
+        }
+        cachedMaterial = material
+    }
+
+    /// Turn on passphrase protection for the current identity, recording the
+    /// public verifier. Used at creation/restore; a mismatched passphrase later
+    /// is then caught by `unlock(passphrase:)`.
+    static func enablePassphrase(_ passphrase: String) async throws {
+        guard !passphrase.isEmpty else { return }
+        let seed = try await unlockedSeed()
+        let material = deriveMaterial(seed: seed, passphrase: passphrase)
+        UserDefaults.standard.set(true, forKey: passphraseEnabledKey)
+        UserDefaults.standard.set(verifier(for: material).base64EncodedString(), forKey: passphraseVerifierKey)
+        cachedMaterial = material
+    }
+
+    private nonisolated static func deriveMaterial(seed: Data, passphrase: String) -> Data {
+        guard !passphrase.isEmpty else { return seed }
+        return pbkdf2(
+            password: Data(passphrase.utf8),
+            salt: passphraseSaltPrefix + seed,
+            rounds: passphraseRounds,
+            keyLength: expectedSeedLength
+        )
+    }
+
+    private nonisolated static func verifier(for material: Data) -> Data {
+        Data(HMAC<SHA256>.authenticationCode(for: verifierInfo, using: SymmetricKey(data: material)))
+    }
+
+    private nonisolated static func storedVerifier() -> Data? {
+        guard let encoded = UserDefaults.standard.string(forKey: passphraseVerifierKey) else {
+            return nil
+        }
+        return Data(base64Encoded: encoded)
+    }
+
+    private nonisolated static func clearPassphraseState() {
+        UserDefaults.standard.removeObject(forKey: passphraseEnabledKey)
+        UserDefaults.standard.removeObject(forKey: passphraseVerifierKey)
+    }
+
+    private nonisolated static func pbkdf2(password: Data, salt: Data, rounds: UInt32, keyLength: Int) -> Data {
+        var derived = Data(count: keyLength)
+        let status = derived.withUnsafeMutableBytes { derivedRaw in
+            salt.withUnsafeBytes { saltRaw in
+                password.withUnsafeBytes { passwordRaw in
+                    CCKeyDerivationPBKDF(
+                        CCPBKDFAlgorithm(kCCPBKDF2),
+                        passwordRaw.bindMemory(to: Int8.self).baseAddress, password.count,
+                        saltRaw.bindMemory(to: UInt8.self).baseAddress, salt.count,
+                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA512),
+                        rounds,
+                        derivedRaw.bindMemory(to: UInt8.self).baseAddress, keyLength
+                    )
+                }
+            }
+        }
+        precondition(status == kCCSuccess, "PBKDF2 failed: \(status)")
+        return derived
     }
 
     nonisolated static func seedExists() -> Bool {
@@ -137,6 +252,8 @@ enum SeedStore {
 
     static func deleteSeed() throws {
         cachedSeed = nil
+        cachedMaterial = nil
+        clearPassphraseState()
         for keychainService in [secureService, service] {
             var query: [CFString: Any] = [
                 kSecClass: kSecClassGenericPassword,
@@ -155,6 +272,7 @@ enum SeedStore {
 
     static func clearCachedSeed() {
         cachedSeed = nil
+        cachedMaterial = nil
     }
 
     /// Return the raw root seed behind the Touch ID gate.
@@ -171,15 +289,22 @@ enum SeedStore {
         }
         let seed = makeSeed()
         try persistSeed(seed)
+        // A fresh identity starts with no passphrase; the caller may enable one.
+        clearPassphraseState()
         cachedSeed = seed
+        cachedMaterial = seed
         return seed
     }
 
     /// Overwrite the root seed with a recovered value (from a backup phrase).
+    /// Passphrase protection is reset — the caller re-establishes it (if any)
+    /// with the passphrase supplied during restore.
     static func restoreSeed(_ seed: Data) throws {
         try validateSeedLength(seed)
         try persistSeed(seed)
+        clearPassphraseState()
         cachedSeed = seed
+        cachedMaterial = seed
     }
 
     /// Enforce secure-storage mode for existing credentials.

@@ -11,10 +11,19 @@
   seed with a Secure Enclave key that requires biometry, instead of the
   app-level LocalAuthentication gate. The app now enforces this mode as
   non-optional: non-secure legacy storage modes are not supported.
-- [ ] **Optional BIP39 passphrase ("25th word")** — domain-separates the
+- [x] **Optional BIP39 passphrase ("25th word")** — domain-separates the
   identity so a leaked paper phrase alone is no longer the whole identity.
-  Changes the derivation contract: must be versioned/opt-in and documented in
-  DERIVATION.md.
+  Shipped: never-stored passphrase, entered per unlock, mixed with the seed in
+  the app before the PRF (Rust helper contract untouched) via
+  PBKDF2-HMAC-SHA512(passphrase, "passeport-25th-word-v1"||seed, 210k). Empty
+  passphrase = byte-identical to the old identity (opt-in, additive). A public
+  HMAC verifier catches a mistyped passphrase before deriving wrong keys.
+  Documented in DERIVATION.md. Chosen at create/restore; prompted at Derive
+  Keys, and **on demand from the bridge** — a background gpg/ssh/age operation
+  after auto-lock surfaces a passphrase panel (mirroring the approval dialog),
+  unlocks, and proceeds, retrying on a wrong entry. Since every private op —
+  gpg bridge, native SSH agent, age plugin — funnels through
+  `ScdBridge.process`, they all inherit this. No manual re-unlock needed.
 - [x] **Auto-lock policy** — clear the in-memory seed on sleep, screen lock,
   or N minutes idle (configurable). Directly shrinks the stolen-unlocked-Mac
   window called out in the security model.
@@ -33,9 +42,10 @@
   pre-existing bug: the secure seed lives in the data-protection keychain, so
   every SecItem query needs `kSecUseDataProtectionKeychain` or cold-launch
   seed detection/reads fail.
-- [ ] **SSH commit signing** — a "Set Up Git Signing (SSH)" option
+- [x] **SSH commit signing** — a "Set Up Git Signing (SSH)" option
   (`gpg.format=ssh`) next to the existing GPG one, including writing the
-  `allowed_signers` file so `git log --show-signature` verifies locally.
+  `allowed_signers` file so `git log --show-signature` verifies locally. Signs
+  through the native SSH agent; verified with `ssh-keygen -Y sign/verify`.
 - [x] **age encryption key (`age-plugin-passeport`)** — Touch ID-gated file
   encryption without GnuPG, completing the second toolchain. Shipped: age
   plugin v1 state machine (recipient + identity), standard X25519 wrap,

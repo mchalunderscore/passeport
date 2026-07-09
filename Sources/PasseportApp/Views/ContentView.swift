@@ -69,6 +69,13 @@ struct ContentView: View {
             BackupDrillSheet(session: session)
                 .environmentObject(app)
         }
+        .sheet(item: Binding(
+            get: { app.passphraseRequest },
+            set: { if $0 == nil { app.cancelPassphrase() } }
+        )) { request in
+            PassphraseSheet(request: request)
+                .environmentObject(app)
+        }
         .alert("Could not update login item", isPresented: $showingLaunchAtLoginFailure) {
             Button("OK", role: .cancel) { showingLaunchAtLoginFailure = false }
         } message: {
@@ -222,8 +229,15 @@ private struct KeysSection: View {
     }
 
     @ViewBuilder private var secretStatus: some View {
-        Label("Seed present on this Mac", systemImage: "checkmark.seal.fill")
-            .foregroundStyle(.green)
+        VStack(alignment: .leading, spacing: 4) {
+            Label("Seed present on this Mac", systemImage: "checkmark.seal.fill")
+                .foregroundStyle(.green)
+            if app.passphraseProtected {
+                Label("Passphrase-protected (25th word)", systemImage: "key.horizontal.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     @ViewBuilder private var onboarding: some View {
@@ -725,10 +739,102 @@ private struct RecoveryPhraseSheet: View {
     }
 }
 
+private struct PassphraseSheet: View {
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let request: PassphraseRequest
+
+    @State private var passphrase = ""
+    @State private var confirmation = ""
+    @FocusState private var focused: Bool
+
+    private var isUnlock: Bool { request.purpose == .unlock }
+
+    private var title: String {
+        switch request.purpose {
+        case .create: "Protect with a passphrase?"
+        case .unlock: "Enter your passphrase"
+        }
+    }
+
+    private var explanation: String {
+        switch request.purpose {
+        case .create:
+            "Optionally add a passphrase — a “25th word” that is never stored and never leaves your memory. With it, your recovery phrase alone cannot reconstruct this identity. Leave blank to skip."
+        case .unlock:
+            "This identity is protected by a passphrase. Enter it to unlock — it is checked before your keys are derived."
+        }
+    }
+
+    /// Create asks twice to guard against a typo; the entry can't be verified,
+    /// so a mismatch there would silently create a different identity.
+    private var needsConfirmation: Bool { request.purpose == .create && !passphrase.isEmpty }
+
+    private var canSubmit: Bool {
+        if isUnlock { return !passphrase.isEmpty }
+        if needsConfirmation { return passphrase == confirmation }
+        return true
+    }
+
+    private var submitLabel: String {
+        switch request.purpose {
+        case .create: passphrase.isEmpty ? "Skip" : "Create"
+        case .unlock: "Unlock"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(.title3.weight(.semibold))
+            Text(explanation)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            SecureField("Passphrase", text: $passphrase)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onSubmit { if canSubmit { submit() } }
+            if needsConfirmation {
+                SecureField("Confirm passphrase", text: $confirmation)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { if canSubmit { submit() } }
+                if !confirmation.isEmpty && passphrase != confirmation {
+                    Text("Passphrases don’t match.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            HStack {
+                Button("Cancel", role: .cancel) {
+                    app.cancelPassphrase()
+                    dismiss()
+                }
+                Spacer()
+                Button(submitLabel) { submit() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSubmit)
+                    .frame(minWidth: 112)
+            }
+            .padding(.top, 4)
+        }
+        .padding(28)
+        .frame(width: 420)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        app.submitPassphrase(passphrase)
+        dismiss()
+    }
+}
+
 private struct RestoreSheet: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var words = Array(repeating: "", count: 24)
+    @State private var passphrase = ""
     @FocusState private var focusedWord: Int?
 
     private var isComplete: Bool {
@@ -763,11 +869,19 @@ private struct RestoreSheet: View {
             .padding(.top, 4)
             .padding(.bottom, 2)
 
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Passphrase (optional)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("Only if this identity was created with one", text: $passphrase)
+                    .textFieldStyle(.roundedBorder)
+            }
+
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }
                 Spacer()
                 Button("Restore") {
-                    app.restore(fromPhrase: phrase)
+                    app.restore(fromPhrase: phrase, passphrase: passphrase)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)

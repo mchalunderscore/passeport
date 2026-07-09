@@ -89,6 +89,8 @@ final class AppModel: ObservableObject {
     }
     @Published private(set) var operationAuditEvents: [OperationAuditEvent] = []
     @Published var backupDrillSession: BackupDrillSession?
+    @Published var passphraseRequest: PassphraseRequest?
+    @Published private(set) var passphraseProtected = SeedStore.passphraseEnabled()
 
     @Published private(set) var launchAtLoginFailure: String?
 
@@ -223,41 +225,40 @@ final class AppModel: ObservableObject {
     }
 
     /// Onboarding: mint a fresh random seed, derive its keys, and surface the
-    /// recovery phrase so the user backs it up right away (wallet-style).
+    /// recovery phrase so the user backs it up right away (wallet-style). An
+    /// existing seed just derives; a fresh one first asks for an optional
+    /// passphrase.
     func createNewIdentity() {
-        runBusy("Creating a new identity") { [self] in
-            if deriveInFlight {
-                return
+        if identity != nil {
+            status = "Keys already derived"
+            return
+        }
+        if SeedStore.seedExists() {
+            deriveKeys()
+            return
+        }
+        passphraseRequest = PassphraseRequest(purpose: .create)
+    }
+
+    /// Derive from the seed already on this Mac. A passphrase identity prompts
+    /// for the passphrase first; otherwise it derives behind Touch ID.
+    func deriveKeys() {
+        if identity != nil {
+            status = "Keys already derived"
+            return
+        }
+        Task { @MainActor in
+            if await SeedStore.needsPassphrase() {
+                self.passphraseRequest = PassphraseRequest(purpose: .unlock)
+            } else {
+                self.runDerive(status: "Keys derived from your seed")
             }
-            if identity != nil {
-                status = "Keys already derived"
-                return
-            }
-            deriveInFlight = true
-            defer { deriveInFlight = false }
-            if SeedStore.seedExists() {
-                self.hasSeed = true
-                status = "A seed already exists on this Mac — deriving keys."
-                try await deriveFromCachedSeed()
-                return
-            }
-            let seed = try await SeedStore.createRandomSeed()
-            self.hasSeed = true
-            self.identity = nil
-            self.showingPrivateMaterial = false
-            let phrase = try SeedBackup.recoveryPhrase(seed: seed)
-            self.recoveryPhrase = phrase
-            try await self.deriveFromCachedSeed()
-            self.status = "New identity created — write down your recovery phrase"
         }
     }
 
-    func deriveKeys() {
+    private func runDerive(status message: String) {
         runBusy("Deriving keys") { [self] in
-            if identity != nil {
-                status = "Keys already derived"
-                return
-            }
+            if identity != nil { return }
             if deriveInFlight {
                 status = "Derivation already running"
                 return
@@ -265,7 +266,55 @@ final class AppModel: ObservableObject {
             deriveInFlight = true
             defer { deriveInFlight = false }
             try await self.deriveFromCachedSeed()
-            self.status = "Keys derived from your seed"
+            self.status = message
+        }
+    }
+
+    /// The user submitted (or skipped) a passphrase prompt. Empty means "no
+    /// passphrase" for create/restore; unlock requires a non-empty value.
+    func submitPassphrase(_ passphrase: String) {
+        guard let request = passphraseRequest else { return }
+        passphraseRequest = nil
+        switch request.purpose {
+        case .create: runCreate(passphrase: passphrase)
+        case .unlock: runUnlock(passphrase: passphrase)
+        }
+    }
+
+    func cancelPassphrase() {
+        passphraseRequest = nil
+    }
+
+    private func runCreate(passphrase: String) {
+        runBusy("Creating a new identity") { [self] in
+            if deriveInFlight { return }
+            deriveInFlight = true
+            defer { deriveInFlight = false }
+            let seed = try await SeedStore.createRandomSeed()
+            self.hasSeed = true
+            self.identity = nil
+            self.showingPrivateMaterial = false
+            if !passphrase.isEmpty {
+                try await SeedStore.enablePassphrase(passphrase)
+            }
+            self.passphraseProtected = SeedStore.passphraseEnabled()
+            let phrase = try SeedBackup.recoveryPhrase(seed: seed)
+            self.recoveryPhrase = phrase
+            try await self.deriveFromCachedSeed()
+            self.status = passphrase.isEmpty
+                ? "New identity created — write down your recovery phrase"
+                : "New identity created — write down your recovery phrase and remember your passphrase (both are required to restore)"
+        }
+    }
+
+    private func runUnlock(passphrase: String) {
+        runBusy("Unlocking identity") { [self] in
+            if deriveInFlight { return }
+            deriveInFlight = true
+            defer { deriveInFlight = false }
+            try await SeedStore.unlock(passphrase: passphrase)
+            try await self.deriveFromCachedSeed()
+            self.status = "Identity unlocked"
         }
     }
 
@@ -308,6 +357,7 @@ final class AppModel: ObservableObject {
                 self.identity = nil
                 self.showingPrivateMaterial = false
                 self.backupDrillSession = nil
+                self.passphraseProtected = SeedStore.passphraseEnabled()
                 self.status = "Seed removed from this Mac"
             }
         }
@@ -482,7 +532,10 @@ final class AppModel: ObservableObject {
         recoveryPhrase = nil
     }
 
-    func restore(fromPhrase phrase: String) {
+    /// Restore an identity from its 24-word phrase and optional passphrase.
+    /// The passphrase is collected in the restore sheet itself (not a separate
+    /// prompt), so both parts arrive together.
+    func restore(fromPhrase phrase: String, passphrase: String) {
         runBusy("Restoring from recovery phrase") { [self] in
             let seed = try SeedBackup.seed(fromPhrase: phrase)
             // The restored seed may differ from the old one; a stale cache
@@ -491,6 +544,10 @@ final class AppModel: ObservableObject {
             try await SeedStore.restoreSeed(seed)
             self.hasSeed = true
             self.showingPrivateMaterial = false
+            if !passphrase.isEmpty {
+                try await SeedStore.enablePassphrase(passphrase)
+            }
+            self.passphraseProtected = SeedStore.passphraseEnabled()
             try await self.deriveFromCachedSeed()
             self.status = "Identity restored from your recovery phrase"
         }
@@ -737,6 +794,14 @@ struct BackupDrillSession: Identifiable, Equatable {
     let id = UUID()
     let wordIndices: [Int]
     let expectedWords: [String]
+}
+
+/// Drives the passphrase-entry sheet. `create`/`restore` treat an empty entry
+/// as "no passphrase"; `unlock` requires the passphrase to open the identity.
+struct PassphraseRequest: Identifiable, Equatable {
+    enum Purpose { case create, unlock }
+    let id = UUID()
+    let purpose: Purpose
 }
 
 private extension String {

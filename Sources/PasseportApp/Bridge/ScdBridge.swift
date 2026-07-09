@@ -230,6 +230,21 @@ final class ScdBridge {
             if requireTouchIDPerOperation, parsed.kind.requiresFreshSeedAuthorization {
                 SeedStore.clearCachedSeed()
             }
+            // A passphrase identity that isn't unlocked yet (e.g. after
+            // auto-lock) must be unlocked before it can sign/decrypt. Prompt
+            // on demand, the way Touch ID surfaces for the seed read.
+            guard try await ensurePassphraseUnlocked() else {
+                await logAuditEvent(
+                    kind: operation,
+                    keyref: keyref,
+                    requestingClient: clientID,
+                    byteCount: byteCount,
+                    summary: summary,
+                    outcome: "denied",
+                    detail: "passphrase unlock cancelled"
+                )
+                return Self.errorJSON("passphrase unlock cancelled")
+            }
             let prf = try await SeedStore.prf(salt: SeedStore.rootSalt)
             responseLine = try Self.runOp(prf: prf, userID: userIDProvider(), request: requestLine)
             if parsed.kind == .keyLookup {
@@ -284,6 +299,27 @@ final class ScdBridge {
 
     private static func confirm(prompt: ApprovalPrompt) async -> Bool {
         await MainActor.run { OperationApproval.present(prompt) }
+    }
+
+    /// Ensure a passphrase identity is unlocked, prompting on demand and
+    /// retrying on a wrong passphrase. Returns false if the user cancels.
+    /// A no-passphrase identity needs nothing and returns true immediately.
+    private func ensurePassphraseUnlocked() async throws -> Bool {
+        guard SeedStore.needsPassphrase() else { return true }
+        var errorMessage: String?
+        while SeedStore.needsPassphrase() {
+            let message = errorMessage
+            let entered = await MainActor.run { PassphraseUnlock.present(errorMessage: message) }
+            guard let entered else {
+                return false
+            }
+            do {
+                try await SeedStore.unlock(passphrase: entered)
+            } catch PasseportError.incorrectPassphrase {
+                errorMessage = "That passphrase does not match this identity."
+            }
+        }
+        return true
     }
 
     /// Derive the public card metadata from an already-unlocked PRF and cache
