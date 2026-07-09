@@ -5,6 +5,7 @@ enum PasseportError: LocalizedError {
     case helperFailed(String)
     case authenticationFailed
     case bridgeFailed(String)
+    case noIdentity
     case passphraseRequired
     case incorrectPassphrase
 
@@ -18,6 +19,8 @@ enum PasseportError: LocalizedError {
             "Authentication was not completed, so the root secret stays locked."
         case .bridgeFailed(let message):
             "The GnuPG bridge could not start: \(message)"
+        case .noIdentity:
+            "No Passeport identity is set up on this Mac. Open Passeport to create or restore one."
         case .passphraseRequired:
             "This identity is protected by a passphrase. Enter it in Passeport to unlock."
         case .incorrectPassphrase:

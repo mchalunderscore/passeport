@@ -212,7 +212,11 @@ final class ScdBridge {
 
         let responseLine: String
         do {
-            if confirmEachOperation {
+            // Public key lookups are not secret and must never prompt — gpg
+            // issues them while building the card, before any real key use.
+            // Prompting here (as an "unknown operation") is what made a
+            // missing identity cascade into gpg's "insert a smartcard".
+            if confirmEachOperation, parsed.kind != .keyLookup {
                 let approved = await Self.confirm(prompt: parsed.toApprovalPrompt())
                 guard approved else {
                     await logAuditEvent(

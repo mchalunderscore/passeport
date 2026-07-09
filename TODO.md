@@ -131,6 +131,22 @@
   (native agent) and age (plugin / in-process) already need no GNU code; this
   entry closes the last gap — the OpenPGP path still leans on GNU `gpg-agent`.
 
+  **This is ADDITIVE to scdaemon mode, not a replacement — the two coexist.**
+  Both are just frontends over the shared `ScdBridge` backend (seed + Touch ID
+  + approval + audit), which every consumer already funnels through:
+      Mode 1 (today):  user gpg → user gpg-agent → scdaemon(shim) → ScdBridge → seed
+      Mode 2 (opt-in): chameleon gpg → Passeport gpg-agent ──────→ ScdBridge → seed
+  Mode 1 keeps Passeport as one card alongside the user's own keys in their
+  `~/.gnupg`. Mode 2 is a self-contained, Passeport-identity-only stack. They
+  don't collide because Mode 2 lives in its **own GNUPGHOME** with its own agent
+  socket (gpg-agent sockets are per-GNUPGHOME), and the bundled `gpg` is invoked
+  with `GNUPGHOME` set so it never shadows the system `gpg`. Same seed-derived
+  identity through both; shared `PublicCardCache`/audit with no conflict; two
+  agents just serialize on the bridge. Each is its own opt-in "Configure…"
+  button. Mode 2's agent deliberately serves only the Passeport identity (keys
+  are seed-derived, never imported) — anyone needing a full keyring stays in
+  Mode 1.
+
   What gpg-agent does, and why replacing it is tractable: it is the private-key
   custodian and Assuan hub `gpg` talks to. But most of its jobs don't apply to
   Passeport — passphrase cache/pinentry (Touch ID replaces it), ssh-agent

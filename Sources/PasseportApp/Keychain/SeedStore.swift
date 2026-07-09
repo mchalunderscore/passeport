@@ -332,7 +332,7 @@ enum SeedStore {
             return cachedSeed
         }
         if !seedExists() {
-            throw PasseportError.bridgeFailed("no seed exists on this Mac")
+            throw PasseportError.noIdentity
         }
         let seed = try loadSeed()
         cachedSeed = seed
