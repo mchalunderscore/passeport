@@ -86,17 +86,30 @@ struct OperationRequestMetadata {
             )
 
         case "pgpdecrypt":
-            // OpenPGP message decryption via the Mode 2 gpg drop-in. Classified
-            // `.decrypt` so it gets the same approval + Touch ID + audit gating
-            // as the scdaemon `ecdh` path.
-            let ciphertext = (decoded["ciphertext"] as? String).flatMap { Hex.decode($0) } ?? Data()
+            let ciphertextPath = decoded["ciphertext_path"] as? String ?? ""
+            let byteCount = (try? FileManager.default.attributesOfItem(atPath: ciphertextPath)[.size] as? NSNumber)?
+                .intValue ?? 0
             return OperationRequestMetadata(
                 kind: .decrypt,
                 keyref: "OPENPGP.2",
                 requestingClient: client?.isEmpty == false ? client! : defaultClient,
-                byteCount: ciphertext.count,
-                hexPreview: Hex.encode(ciphertext.prefix(24)),
+                byteCount: byteCount,
+                hexPreview: "",
                 summary: comment.isEmpty ? "decrypt an OpenPGP message" : comment,
+                requestJSON: decoded
+            )
+
+        case "agedecrypt":
+            let ciphertextPath = decoded["ciphertext_path"] as? String ?? ""
+            let byteCount = (try? FileManager.default.attributesOfItem(atPath: ciphertextPath)[.size] as? NSNumber)?
+                .intValue ?? 0
+            return OperationRequestMetadata(
+                kind: .decrypt,
+                keyref: "OPENPGP.2",
+                requestingClient: client?.isEmpty == false ? client! : defaultClient,
+                byteCount: byteCount,
+                hexPreview: "",
+                summary: comment.isEmpty ? "decrypt an age file" : comment,
                 requestJSON: decoded
             )
 

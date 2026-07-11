@@ -22,6 +22,12 @@ actor OperationAuditLog {
     static let maxEntries = 500
 
     private var cached: [OperationAuditEvent] = []
+    private var persistenceError: String?
+    private let storageURL: URL
+
+    init(storageURL: URL? = nil) {
+        self.storageURL = storageURL ?? Self.fileURL
+    }
 
     private static var fileURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -46,40 +52,56 @@ actor OperationAuditLog {
             current = Array(current.prefix(Self.maxEntries))
         }
         cached = current
-        _ = try? save(current)
+        do {
+            try save(current)
+            persistenceError = nil
+        } catch {
+            persistenceError = "Audit record could not be saved: \(error.localizedDescription)"
+        }
         await notifyChanged()
     }
 
     func clear() async {
         cached.removeAll()
-        try? FileManager.default.removeItem(at: Self.fileURL)
+        do {
+            if FileManager.default.fileExists(atPath: storageURL.path) {
+                try FileManager.default.removeItem(at: storageURL)
+            }
+            persistenceError = nil
+        } catch {
+            persistenceError = "Audit log could not be cleared: \(error.localizedDescription)"
+        }
         await notifyChanged()
+    }
+
+    func persistenceWarning() -> String? {
+        persistenceError
     }
 
     /// Read the log from disk. A missing file is a fresh log; an unreadable
     /// one is moved aside instead of being silently overwritten by the next
     /// append — this is an audit trail, losing it should leave a trace.
     private func loadOrQuarantine() -> [OperationAuditEvent] {
-        guard let data = try? Data(contentsOf: Self.fileURL) else {
+        guard let data = try? Data(contentsOf: storageURL) else {
             return []
         }
         do {
             return try JSONDecoder().decode([OperationAuditEvent].self, from: data)
         } catch {
-            let quarantine = Self.fileURL.appendingPathExtension("corrupt")
+            let quarantine = storageURL.appendingPathExtension("corrupt")
             try? FileManager.default.removeItem(at: quarantine)
-            try? FileManager.default.moveItem(at: Self.fileURL, to: quarantine)
+            try? FileManager.default.moveItem(at: storageURL, to: quarantine)
             return []
         }
     }
 
     private func save(_ events: [OperationAuditEvent]) throws {
-        let base = Self.fileURL.deletingLastPathComponent()
+        let base = storageURL.deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: base.path) {
             try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         }
         let encoded = try JSONEncoder().encode(events)
-        try encoded.write(to: Self.fileURL)
+        try encoded.write(to: storageURL, options: [.atomic])
     }
 
     private func notifyChanged() async {

@@ -8,7 +8,6 @@ struct KeyDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     PublicKeySection(identity: identity)
-                    PrivateKeySection(identity: identity)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -17,7 +16,7 @@ struct KeyDetailView: View {
             ContentUnavailableView(
                 "No Keys In Memory",
                 systemImage: "lock",
-                description: Text("Derive keys from your seed to see them here.")
+                description: Text("Unlock your identity to see its public keys here.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -29,66 +28,50 @@ private struct PublicKeySection: View {
     let identity: DerivedIdentity
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(
-                title: "Public Material",
-                actions: [
-                    ActionButton(label: "Copy SSH", systemImage: "doc.on.doc") {
-                        app.copy(identity.ssh.publicKey, label: "SSH public key")
-                    },
-                    ActionButton(label: "Copy age", systemImage: "doc.on.doc") {
-                        app.copy(identity.age.recipient, label: "age recipient")
-                    },
-                    ActionButton(label: "Export", systemImage: "square.and.arrow.down") {
-                        app.exportPublicBundle()
-                    }
-                ]
-            )
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                KeyField(
+                    title: "SSH public key (OpenPGP auth subkey)",
+                    value: identity.ssh.publicKey,
+                    copyAction: { app.copy(identity.ssh.publicKey, label: "SSH public key") }
+                )
+                KeyField(
+                    title: "OpenPGP public key",
+                    value: identity.pgp.publicKey,
+                    minHeight: 180,
+                    copyAction: { app.copy(identity.pgp.publicKey, label: "OpenPGP public key") }
+                )
+                KeyField(
+                    title: "age recipient (OpenPGP encryption subkey)",
+                    value: identity.age.recipient,
+                    copyAction: { app.copy(identity.age.recipient, label: "age recipient") }
+                )
+                KeyField(
+                    title: "minisign public key (seed-derived Ed25519)",
+                    value: identity.minisign.publicKey,
+                    copyAction: { app.copy(identity.minisign.publicKey, label: "minisign public key") }
+                )
 
-            KeyField(title: "SSH public key (OpenPGP auth subkey)", value: identity.ssh.publicKey)
-            KeyField(title: "OpenPGP fingerprint", value: identity.pgp.fingerprint, minHeight: 40)
-            KeyField(title: "OpenPGP public key", value: identity.pgp.publicKey, minHeight: 180)
-            KeyField(title: "age recipient (OpenPGP encryption subkey)", value: identity.age.recipient)
-        }
-    }
-}
-
-private struct PrivateKeySection: View {
-    @EnvironmentObject private var app: AppModel
-    let identity: DerivedIdentity
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(
-                title: "Private Material",
-                actions: [
-                    ActionButton(label: app.showingPrivateMaterial ? "Hide" : "Reveal", systemImage: app.showingPrivateMaterial ? "eye.slash" : "eye") {
-                        app.showingPrivateMaterial.toggle()
-                    },
-                    ActionButton(label: "Export", systemImage: "square.and.arrow.down") {
-                        app.exportPrivateBundle()
-                    }
-                ]
-            )
-
-            if app.showingPrivateMaterial {
-                KeyField(title: "OpenPGP secret key", value: identity.pgp.secretKey, minHeight: 220)
-            } else {
-                Text("Private keys are derived in memory and hidden until explicitly revealed.")
-                    .foregroundStyle(.secondary)
+                ActionBar(
+                    actions: [
+                        ActionButton(label: "Export Public Keys", systemImage: "square.and.arrow.down") {
+                            app.exportPublicBundle()
+                        }
+                    ]
+                )
             }
+            .padding(6)
+        } label: {
+            Label("Public Keys", systemImage: "key")
         }
     }
 }
 
-private struct SectionHeader: View {
-    let title: String
+private struct ActionBar: View {
     let actions: [ActionButton]
 
     var body: some View {
         HStack {
-            Text(title)
-                .font(.title3.weight(.semibold))
             Spacer()
             ForEach(actions) { action in
                 Button(action: action.action) {
@@ -111,11 +94,21 @@ private struct KeyField: View {
     let title: String
     let value: String
     var minHeight: CGFloat = 72
+    var copyAction: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.headline)
+            HStack {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                if let copyAction {
+                    Button(action: copyAction) {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                    .controlSize(.small)
+                }
+            }
             ScrollView {
                 Text(value)
                     .font(.system(.callout, design: .monospaced))

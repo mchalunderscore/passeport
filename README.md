@@ -43,12 +43,11 @@ generated private keys stay in memory unless you explicitly export them.
 
 ### External tools
 
-A release build bundles the permissive, pure-Rust **`rage`/`age`** (str4d/rage,
-MIT/Apache) into `Passeport.app/Contents/Helpers` for age encryption. Everything
-else is **Passeport's own** pure-Rust CLI in `passeport-core`: the `gpg` drop-in
-(Mode 2 OpenPGP) and the `minisign` command (sign + verify) — no third-party gpg,
-minisign, or rsign2 is shipped. So age encryption, minisign signing/verification,
-and GNU-free git signing work with nothing else installed.
+A release build ships one executable helper: **`passeport-core`**. It provides
+Passeport's pure-Rust `age`, `gpg` (Mode 2 OpenPGP), and `minisign` commands, so
+age encryption, minisign signing/verification, and GNU-free git signing work
+with nothing else installed. No third-party CLI binaries are bundled; the helper
+links permissively licensed pure-Rust libraries, including `age` and rpgp.
 
 GNU `gpg` is needed **only** for the optional **Mode 1** smartcard bridge (which
 serves the identity into your existing `~/.gnupg`). If you want that path,
@@ -69,10 +68,9 @@ or run it.
 
 ## Packaging a release DMG
 
-`scripts/make-dmg.sh` builds `Passeport.app`, **bundles the permissive toolchain**
-(`scripts/bundle-tooling.sh` vendors `rage` into `Contents/Helpers` with the
-`age→rage` name-symlink), and packages it into
-`dist/Passeport.dmg` (with a drag-to-`/Applications` symlink).
+`scripts/make-dmg.sh` builds `Passeport.app` (including the single
+`passeport-core` helper) and packages it into `dist/Passeport.dmg` with a
+drag-to-`/Applications` symlink.
 
 ```sh
 scripts/make-dmg.sh
@@ -88,11 +86,8 @@ CODESIGN_IDENTITY="Developer ID Application: You (TEAMID)" \
   scripts/make-dmg.sh
 ```
 
-`CODESIGN_IDENTITY` signs every bundled Mach-O (rage/passeport-core) with
-the hardened runtime and re-signs the app; `NOTARIZE=1` submits and staples.
-Bundling the universal binaries requires the `x86_64-apple-darwin` and
-`aarch64-apple-darwin` Rust targets (`rustup target add …`); with only one, a
-single-arch build is shipped.
+`CODESIGN_IDENTITY` signs `passeport-core` with the hardened runtime and
+re-signs the app; `NOTARIZE=1` submits and staples.
 
 For manual distribution workflows, the GitHub Action renames releases to:
 
@@ -169,7 +164,7 @@ machine) has the identity; nobody else does, and it depends on no cloud account.
 - **A real upgrade over a bare key file.** The alternative most people use is a
   private key sitting in `~/.ssh` or `~/.gnupg`, readable by any process that
   runs as you. Here the key material never lands on disk, stays in memory, is
-  gated behind Touch ID, and flows to `gpg`/`ssh` through a virtual smartcard
+  unlocked through LocalAuthentication, and flows to `gpg`/`ssh` through a virtual smartcard
   rather than living in their keyrings.
 
 **Rule of thumb:** if your threat model includes malware with your user
@@ -187,12 +182,13 @@ The derivation contract is documented in [DERIVATION.md](DERIVATION.md).
 
 Passeport can serve the derived identity to `gpg-agent` as a virtual OpenPGP
 smartcard, so `gpg` and `ssh` use it without the private keys ever entering
-their keyrings. Private operations run inside the app behind the Touch ID
-gate; the helper that gpg-agent talks to holds no key material.
+their keyrings. Private operations run inside the app under its confirmation
+and optional per-operation authentication policy; the helper that gpg-agent
+talks to holds no key material.
 
 The quick path:
 
-1. Derive your keys (**Derive Keys**).
+1. Unlock your identity (**Unlock**).
 2. Click **Configure GnuPG**. This starts the bridge, writes the scdaemon
    wrapper and `gpg-agent.conf` (`scdaemon-program` + `enable-ssh-support`,
    backing up any existing config), imports the public key, and creates the
@@ -244,7 +240,7 @@ and `tag.gpgsign`. New commits and tags are then signed by the virtual card.
 
 Beyond the Mode 1 smartcard bridge (which relies on your own GnuPG), Passeport
 ships a fully **GNU-free** stack. Every private-key operation still runs inside
-the app behind Touch ID; only public/framing work happens in the CLIs.
+the app under its approval policy; only public/framing work happens in the CLIs.
 
 - **GNU-free OpenPGP (Mode 2).** **Configure GNU-free OpenPGP** installs a
   self-contained, pure-Rust `gpg` drop-in (built on the `pgp`/rpgp crate) and
@@ -252,20 +248,25 @@ the app behind Touch ID; only public/framing work happens in the CLIs.
   **no GnuPG binary anywhere** — the raw Ed25519 op is delegated to the app over
   the bridge — and the signatures it produces verify under standard `gpg` (so
   GitHub's "Verified" badge works). Beyond detached signing it also **clear-signs,
-  encrypts to your own key, and decrypts** (decryption is Touch ID-gated through
+  encrypts to your own key, and decrypts** (decryption is approval-controlled through
   the app, interoperating with messages real `gpg` encrypted to you). Run
   `passeport-core gpg --help` for the full command list. It serves only the
   Passeport identity; verifying third-party signatures, encrypting to anyone else,
   or exporting secret keys is refused by design. Coexists with Mode 1 — pick
   whichever you point git at.
 - **minisign.** **Set Up minisign Signing** derives a dedicated Ed25519 signing
-  key (its own HKDF domain) and installs a single pure-Rust `minisign` command.
-  Sign with `minisign -Sm <file>` (Touch ID-gated) and verify with
-  `minisign -Vm <file> -p <key>` — one command for both, no rsign2, no GNU tooling.
+  key (its own HKDF domain) and installs the pure-Rust `passeport-minisign`
+  command. Sign with `passeport-minisign -Sm <file>` (approval-controlled) and
+  verify with `passeport-minisign -Vm <file> -p <key>`. An optional, explicit
+  `minisign` alias is available and will not overwrite another installation.
   Anyone with your published public key can verify.
-- **age encryption.** **Set Up age Encryption** installs `age-plugin-passeport`;
-  the bundled `rage` (callable as `age`) encrypts to your recipient and decrypts
-  through the app.
+- **age encryption.** **Set Up age Encryption** installs Passeport's own
+  `passeport-age` command (with an optional, explicit `age` alias that will not
+  overwrite another installation). It encrypts standard age files to your public `age1…` recipient and
+  sends complete ciphertext to the app for approval-controlled decryption; the secret
+  scalar never enters the CLI. The optional `age-plugin-passeport` wrapper is
+  also installed so a separately supplied age/rage can decrypt through the same
+  bridge.
 
 ### Backup & recovery
 

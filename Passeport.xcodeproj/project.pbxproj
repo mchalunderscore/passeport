@@ -330,7 +330,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\n\nexport PATH=\"$HOME/.cargo/bin:$PATH\"\n\nif [ \"${CONFIGURATION}\" = \"Release\" ]; then\n  CARGO_PROFILE=release\n  CARGO_FLAGS=\"--release\"\nelse\n  CARGO_PROFILE=debug\n  CARGO_FLAGS=\"\"\nfi\n\ncargo build --manifest-path \"${SRCROOT}/crates/passeport-core/Cargo.toml\" ${CARGO_FLAGS}\n\nHELPER_SRC=\"${SRCROOT}/crates/passeport-core/target/${CARGO_PROFILE}/passeport-core\"\nHELPER_DIR=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers\"\nHELPER_DST=\"${HELPER_DIR}/passeport-core\"\n\nmkdir -p \"${HELPER_DIR}\"\ncp \"${HELPER_SRC}\" \"${HELPER_DST}\"\n\nif command -v xattr >/dev/null 2>&1; then\n  xattr -cr \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\" 2>/dev/null || true\nfi\n\nif [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ] && [ \"${CODE_SIGNING_ALLOWED:-YES}\" != \"NO\" ]; then\n  codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none \"${HELPER_DST}\"\nfi\n";
+			shellScript = "/bin/sh \"${SRCROOT}/scripts/build-rust-helper.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

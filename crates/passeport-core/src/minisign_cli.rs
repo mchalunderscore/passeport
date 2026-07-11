@@ -2,7 +2,7 @@
 //! both signing and verifying.
 //!
 //! Signing uses the seed-derived minisign key and is delegated to the app over
-//! the bridge (Touch ID-gated); verification is fully public and works on ANY
+//! the bridge (approval-controlled); verification is fully public and works on ANY
 //! minisign/rsign signature, not just ours. There is no key generation: the key
 //! is derived from the Passeport seed (use `-R` to print your public key).
 
@@ -13,7 +13,7 @@ use crate::minisign;
 const HELP_TEXT: &str = "\
 Passeport minisign — sign and verify with your seed-derived minisign key.
 
-  -S -m FILE [-x SIG] [-c COMMENT] [-t TRUSTED]   sign FILE (Touch ID-gated)
+  -S -m FILE [-x SIG] [-c COMMENT] [-t TRUSTED]   sign FILE (app-approved)
   -V -m FILE [-x SIG] [-p PUBKEY | -P PUBKEYSTR]  verify a signature
   -R [-p OUT]                                     print your public key
 

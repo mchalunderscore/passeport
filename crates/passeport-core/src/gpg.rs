@@ -20,7 +20,7 @@ use crate::pgp_sign::{self, HASH_ALGO_SHA512, PK_ALGO_EDDSA, VerifyOutcome};
 
 const HELP_TEXT: &str = "\
 Passeport gpg — a self-contained OpenPGP CLI for your one Passeport identity.
-Private-key operations run in the app (Touch ID-gated); the seed never leaves it.
+Private-key operations run under the app's approval policy; the seed never leaves it.
 
 Supported:
   -b -s -a -u KEY --detach-sign   detached signature (git commit/tag signing)
@@ -34,7 +34,7 @@ Supported:
 Refused by design (single identity, no keyring):
   verifying someone else's signature   -> ERRSIG / NO_PUBKEY
   encrypting to anyone but yourself     -> INV_RECP
-  --export-secret-keys                  the seed never leaves the Secure Enclave
+  --export-secret-keys                  the seed is never exposed to the CLI
   --import / --gen-key / --edit-key / keyservers / trustdb / --symmetric
 
 Notes:
@@ -71,7 +71,7 @@ fn dispatch(opts: &Options) -> Result<i32> {
         bail!("operation '{cmd}' is not supported by Passeport (single-identity, no keyring)");
     }
     if opts.export_secret {
-        bail!("exporting secret keys is not allowed — the seed never leaves the Secure Enclave");
+        bail!("exporting secret keys is not allowed — the seed is never exposed to the CLI");
     }
     if opts.export {
         return cmd_export(opts);
@@ -183,18 +183,32 @@ fn cmd_decrypt(opts: &Options) -> Result<i32> {
     // ID-gated); the seed never enters this process.
     let socket = std::env::var("PASSEPORT_SCD_SOCKET")
         .context("PASSEPORT_SCD_SOCKET is unset — is the Passeport app running?")?;
+    let handoff = crate::handoff::DecryptHandoff::create("passeport-pgp-", &ciphertext)?;
+    let reader = handoff.start_reader();
     let request = crate::ops::Request::PgpDecrypt {
-        ciphertext,
+        ciphertext_path: handoff.ciphertext_path(),
+        plaintext_path: handoff.plaintext_path(),
         client: Some("gpg (passeport)".to_owned()),
         comment: Some("decrypt an OpenPGP message".to_owned()),
     };
-    let plaintext = match crate::ops::call_socket(&socket, &request)? {
-        crate::ops::Response::PgpDecrypt { plaintext, .. } => plaintext,
-        crate::ops::Response::Error { error, .. } => {
+    let plaintext = match crate::ops::call_socket(&socket, &request) {
+        Ok(crate::ops::Response::PgpDecrypt { .. }) => crate::handoff::join_reader(reader)?,
+        Ok(crate::ops::Response::Error { error, .. }) => {
+            handoff.cancel_reader();
+            let _ = crate::handoff::join_reader(reader);
             opts.status("DECRYPTION_FAILED");
             bail!(error);
         }
-        other => bail!("unexpected bridge response: {other:?}"),
+        Ok(other) => {
+            handoff.cancel_reader();
+            let _ = crate::handoff::join_reader(reader);
+            bail!("unexpected bridge response: {other:?}");
+        }
+        Err(error) => {
+            handoff.cancel_reader();
+            let _ = crate::handoff::join_reader(reader);
+            return Err(error);
+        }
     };
 
     opts.status("BEGIN_DECRYPTION");

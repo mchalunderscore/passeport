@@ -1,7 +1,7 @@
 import Foundation
 
-/// Locates the external CLI binaries that Passeport flows shell out to but does
-/// not itself provide (currently GnuPG and age/rage). Passeport deliberately
+/// Locates external CLI binaries that Passeport flows shell out to but does
+/// not itself provide (currently optional Mode 1 GnuPG). Passeport deliberately
 /// ships no in-app installer: the user supplies these binaries via their package
 /// manager, the official installer, or `scripts/install-tooling.sh`, and keeps
 /// them on `PATH` (or in `~/.local/bin`, which the app also searches). This type
@@ -10,46 +10,29 @@ enum ToolingInstaller {
     static let localBinURL = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent(".local/bin", isDirectory: true)
 
-    /// The app bundle's `Contents/Helpers`, where the permissive toolchain
-    /// (`rage`/`age`) is shipped. It holds no `gpg`, so this
-    /// never makes the Mode 1 GnuPG detection resolve to our own drop-in.
-    static let bundledHelpersURL = Bundle.main.bundleURL
-        .appendingPathComponent("Contents/Helpers", isDirectory: true)
-
     /// The user's real `PATH`, as reported by their login shell. A GUI app
     /// launched from Finder/Xcode inherits only the minimal launchd `PATH`, not
     /// the shell `PATH`, so tools the user installed (Homebrew, grimoire, …) are
     /// invisible otherwise. Resolved once by asking the login shell, and cached.
     static let loginShellPaths: [String] = resolveLoginShellPaths()
 
-    /// Accepted binary names, in preference order. `rage` (the Rust age
-    /// implementation) is preferred over `age`; either satisfies the age flows.
-    static let rageBinaryNames = ["rage", "age"]
     static let gnuPGBinaryNames = ["gpg"]
 
     static var gnuPGPath: String? {
         resolveTool(named: gnuPGBinaryNames)?.path
     }
 
-    static var ragePath: String? {
-        resolveTool(named: rageBinaryNames)?.path
-    }
-
     static var hasGnuPG: Bool {
         resolveTool(named: gnuPGBinaryNames) != nil
-    }
-
-    static var hasRageOrAge: Bool {
-        resolveTool(named: rageBinaryNames) != nil
     }
 
     // MARK: - Discovery
 
     /// Return the first executable matching any of `names`, searching
-    /// `~/.local/bin` and the bundled Helpers first, then each directory on the
-    /// user's login-shell `PATH`.
+    /// `~/.local/bin` first, then each directory on the user's login-shell
+    /// `PATH`.
     private static func resolveTool(named names: [String]) -> URL? {
-        var searchPaths: [String] = [localBinURL.path, bundledHelpersURL.path]
+        var searchPaths: [String] = [localBinURL.path]
         searchPaths.append(contentsOf: loginShellPaths)
 
         for dir in searchPaths {

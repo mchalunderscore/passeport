@@ -103,7 +103,8 @@ enum SeedStore {
     static func unlock(passphrase: String) async throws {
         let seed = try await unlockedSeed()
         let material = deriveMaterial(seed: seed, passphrase: passphrase)
-        if let expected = loadVerifierRecord(), !expected.isEmpty {
+        if let expected = loadVerifierRecord() {
+            try validatePassphraseVerifier(expected)
             guard verifier(for: material) == expected else {
                 throw PasseportError.incorrectPassphrase
             }
@@ -155,12 +156,30 @@ enum SeedStore {
     private nonisolated static func migrateLegacyPassphraseState() -> Data? {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: passphraseEnabledKey) else { return nil }
-        let verifier = defaults.string(forKey: passphraseVerifierKey)
-            .flatMap { Data(base64Encoded: $0) } ?? Data()
+        let verifier = decodeLegacyVerifier(
+            enabled: true,
+            encoded: defaults.string(forKey: passphraseVerifierKey)
+        ) ?? Data()
         guard (try? storeVerifierRecord(verifier)) != nil else { return verifier }
         defaults.removeObject(forKey: passphraseEnabledKey)
         defaults.removeObject(forKey: passphraseVerifierKey)
         return verifier
+    }
+
+    nonisolated static func decodeLegacyVerifier(enabled: Bool, encoded: String?) -> Data? {
+        guard enabled else { return nil }
+        guard let encoded,
+              let verifier = Data(base64Encoded: encoded),
+              verifier.count == SHA256.byteCount else {
+            return Data()
+        }
+        return verifier
+    }
+
+    nonisolated static func validatePassphraseVerifier(_ verifier: Data) throws {
+        guard verifier.count == SHA256.byteCount else {
+            throw PasseportError.corruptPassphraseState
+        }
     }
 
     private nonisolated static func storeVerifierRecord(_ verifier: Data) throws {

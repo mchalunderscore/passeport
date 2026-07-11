@@ -17,7 +17,7 @@ struct PasseportApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Passeport", id: "main") {
             ContentView()
                 .environmentObject(appModel)
                 .frame(minWidth: 860, minHeight: 600)
@@ -34,30 +34,51 @@ struct PasseportApp: App {
             CommandGroup(replacing: .newItem) {}
         }
 
-        MenuBarExtra("Passeport", image: "Symbolic") {
+        MenuBarExtra("Passeport", image: "PasseportLogo") {
             MenuBarContent()
                 .environmentObject(appModel)
+        }
+
+        Settings {
+            SettingsSection()
+                .environmentObject(appModel)
+                .frame(width: 680, height: 620)
         }
     }
 }
 
 private struct MenuBarContent: View {
     @EnvironmentObject private var app: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Text(app.bridgeRunning ? "GnuPG bridge: running" : "GnuPG bridge: stopped")
+        Label(
+            app.identity == nil ? "Identity locked" : "Identity ready",
+            systemImage: app.identity == nil ? "lock" : "checkmark.seal.fill"
+        )
 
-        Button(app.bridgeRunning ? "Stop Bridge" : "Start Bridge") {
+        Divider()
+
+        Button("Open Passeport") {
+            openWindow(id: "main")
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+
+        Button(app.sshAgentRunning ? "Stop SSH Agent" : "Start SSH Agent") {
+            app.toggleSSHAgent()
+        }
+        .disabled(app.isBusy)
+
+        Button(app.bridgeRunning ? "Stop GnuPG Bridge" : "Start GnuPG Bridge") {
             app.toggleBridge()
         }
         .disabled(app.isBusy)
 
-        Button("Configure GnuPG…") {
-            app.configureGnuPG()
-        }
-        .disabled(app.isBusy || app.identity == nil)
-
         Divider()
+
+        SettingsLink {
+            Text("Settings…")
+        }
 
         Button("Quit Passeport") {
             NSApplication.shared.terminate(nil)

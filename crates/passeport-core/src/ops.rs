@@ -1,7 +1,7 @@
 //! Primitive private-key operations and the `op` subcommand.
 //!
 //! `op` mode is what the Passeport app invokes (after unlocking the seed
-//! behind Touch ID) to answer a single request from the scd shim. The seed
+//! under the app's approval policy) to answer a single request from the scd shim. The seed
 //! reaches this process only on stdin and only for the lifetime of one call;
 //! the shim itself never sees it.
 
@@ -62,11 +62,21 @@ pub enum Request {
         comment: Option<String>,
     },
     /// Decrypt an OpenPGP message encrypted to our cv25519 encryption subkey.
-    /// Handled in `run_op`, where the full secret key is reconstructed from the
-    /// seed; the seed never reaches the shim.
+    /// Ciphertext and plaintext use the shared bounded file/FIFO handoff.
     PgpDecrypt {
-        #[serde(with = "hex_bytes")]
-        ciphertext: Vec<u8>,
+        ciphertext_path: String,
+        plaintext_path: String,
+        #[serde(default)]
+        client: Option<String>,
+        #[serde(default)]
+        comment: Option<String>,
+    },
+    /// Decrypt a standard age file with the cv25519 encryption subkey.
+    /// The CLI and gated op exchange file paths instead of placing whole files
+    /// on the line-delimited JSON bridge.
+    AgeDecrypt {
+        ciphertext_path: String,
+        plaintext_path: String,
         #[serde(default)]
         client: Option<String>,
         #[serde(default)]
@@ -97,8 +107,9 @@ pub enum Response {
     },
     PgpDecrypt {
         ok: bool,
-        #[serde(with = "hex_bytes")]
-        plaintext: Vec<u8>,
+    },
+    AgeDecrypt {
+        ok: bool,
     },
     Error {
         ok: bool,
@@ -205,6 +216,9 @@ pub fn handle(seed: &[u8; 32], user_id: &str, request: &Request) -> Result<Respo
             // Reconstructs the full secret key; routed through run_op.
             bail!("pgp decrypt must be routed through run_op, not handle()")
         }
+        Request::AgeDecrypt { .. } => {
+            bail!("age decrypt must be routed through run_op, not handle()")
+        }
     }
 }
 
@@ -250,18 +264,28 @@ pub fn run_op() -> Result<()> {
                 error: format!("{error:#}"),
             },
         },
-        Request::PgpDecrypt { ciphertext, .. } => {
-            match run_pgp_decrypt(&prf, &envelope.user_id, ciphertext) {
-                Ok(plaintext) => Response::PgpDecrypt {
-                    ok: true,
-                    plaintext,
-                },
-                Err(error) => Response::Error {
-                    ok: false,
-                    error: format!("{error:#}"),
-                },
-            }
-        }
+        Request::PgpDecrypt {
+            ciphertext_path,
+            plaintext_path,
+            ..
+        } => match run_pgp_decrypt_file(&prf, &envelope.user_id, ciphertext_path, plaintext_path) {
+            Ok(()) => Response::PgpDecrypt { ok: true },
+            Err(error) => Response::Error {
+                ok: false,
+                error: format!("{error:#}"),
+            },
+        },
+        Request::AgeDecrypt {
+            ciphertext_path,
+            plaintext_path,
+            ..
+        } => match run_age_decrypt_file(&prf, &envelope.user_id, ciphertext_path, plaintext_path) {
+            Ok(()) => Response::AgeDecrypt { ok: true },
+            Err(error) => Response::Error {
+                ok: false,
+                error: format!("{error:#}"),
+            },
+        },
         request => {
             let seed = identity::derive_pgp_seed(&prf)?;
             match handle(&seed, &envelope.user_id, request) {
@@ -308,6 +332,49 @@ fn run_pgp_decrypt(prf: &[u8; 32], user_id: &str, ciphertext: &[u8]) -> Result<V
     decrypted
         .get_content()?
         .context("the decrypted message had no content")
+}
+
+fn run_pgp_decrypt_file(
+    prf: &[u8; 32],
+    user_id: &str,
+    ciphertext_path: &str,
+    plaintext_path: &str,
+) -> Result<()> {
+    let ciphertext = std::fs::read(ciphertext_path)
+        .with_context(|| format!("failed to read OpenPGP ciphertext at {ciphertext_path}"))?;
+    let plaintext = run_pgp_decrypt(prf, user_id, &ciphertext)?;
+    crate::handoff::write_plaintext(plaintext_path, &plaintext)
+}
+
+/// Decrypt a standard age file with the seed-derived OPENPGP.2 scalar. The
+/// temporary secret identity exists only in this gated op process.
+fn run_age_decrypt(prf: &[u8; 32], user_id: &str, ciphertext: &[u8]) -> Result<Vec<u8>> {
+    let seed = identity::derive_pgp_seed(prf)?;
+    let materials = identity::slot_materials(&seed, user_id)?;
+    let decrypt = materials
+        .iter()
+        .find(|material| material.role == SlotRole::Decrypt)
+        .context("missing cv25519 decryption slot")?;
+    let SlotSecret::X25519(scalar) = &decrypt.secret else {
+        bail!("OPENPGP.2 is not an X25519 key");
+    };
+    let encoded = crate::age::encode_secret_identity(scalar)?;
+    let age_identity: age_lib::x25519::Identity = encoded
+        .parse()
+        .map_err(|error| anyhow::anyhow!("failed to construct age identity: {error}"))?;
+    age_lib::decrypt(&age_identity, ciphertext).context("failed to decrypt age file")
+}
+
+fn run_age_decrypt_file(
+    prf: &[u8; 32],
+    user_id: &str,
+    ciphertext_path: &str,
+    plaintext_path: &str,
+) -> Result<()> {
+    let ciphertext = std::fs::read(ciphertext_path)
+        .with_context(|| format!("failed to read age ciphertext at {ciphertext_path}"))?;
+    let plaintext = run_age_decrypt(prf, user_id, &ciphertext)?;
+    crate::handoff::write_plaintext(plaintext_path, &plaintext)
 }
 
 /// Hex (de)serialization for `Vec<u8>` fields on the wire.
@@ -386,6 +453,97 @@ mod tests {
     #[test]
     fn minisign_rejects_short_prehash() {
         assert!(run_minisign_sign(&[7u8; 32], &[0u8; 32], "tc", "uc").is_err());
+    }
+
+    #[test]
+    fn age_decrypt_op_opens_standard_age_ciphertext() {
+        let prf = [7u8; 32];
+        let user_id = "Passeport Test <test@example.invalid>";
+        let seed = identity::derive_pgp_seed(&prf).unwrap();
+        let materials = identity::slot_materials(&seed, user_id).unwrap();
+        let decrypt = materials
+            .iter()
+            .find(|material| material.role == SlotRole::Decrypt)
+            .unwrap();
+        let mut public = [0u8; 32];
+        public.copy_from_slice(&decrypt.q[1..]);
+        let recipient: age_lib::x25519::Recipient = crate::age::encode_recipient(&public)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let ciphertext = age_lib::encrypt(&recipient, b"standard age interop").unwrap();
+
+        let plaintext = run_age_decrypt(&prf, user_id, &ciphertext).unwrap();
+        assert_eq!(plaintext, b"standard age interop");
+    }
+
+    #[test]
+    fn age_decrypt_file_handoff_handles_large_payloads_with_small_json() {
+        let prf = [7u8; 32];
+        let user_id = "Passeport Test <test@example.invalid>";
+        let seed = identity::derive_pgp_seed(&prf).unwrap();
+        let materials = identity::slot_materials(&seed, user_id).unwrap();
+        let decrypt = materials
+            .iter()
+            .find(|material| material.role == SlotRole::Decrypt)
+            .unwrap();
+        let mut public = [0u8; 32];
+        public.copy_from_slice(&decrypt.q[1..]);
+        let recipient: age_lib::x25519::Recipient = crate::age::encode_recipient(&public)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let plaintext = vec![0x5a; 2_000_000];
+        let ciphertext = age_lib::encrypt(&recipient, &plaintext).unwrap();
+        let handoff =
+            crate::handoff::DecryptHandoff::create("passeport-age-", &ciphertext).unwrap();
+        let reader = handoff.start_reader();
+
+        let request = Request::AgeDecrypt {
+            ciphertext_path: handoff.ciphertext_path(),
+            plaintext_path: handoff.plaintext_path(),
+            client: None,
+            comment: None,
+        };
+        assert!(serde_json::to_vec(&request).unwrap().len() < 1_024);
+        run_age_decrypt_file(
+            &prf,
+            user_id,
+            &handoff.ciphertext_path(),
+            &handoff.plaintext_path(),
+        )
+        .unwrap();
+        assert_eq!(crate::handoff::join_reader(reader).unwrap(), plaintext);
+    }
+
+    #[test]
+    fn pgp_decrypt_file_handoff_handles_large_payloads_with_small_json() {
+        let prf = [7u8; 32];
+        let user_id = "Passeport Test <test@example.invalid>";
+        let seed = identity::derive_pgp_seed(&prf).unwrap();
+        let secret = identity::generate_signed_key(&seed, user_id).unwrap();
+        let public: pgp::SignedPublicKey = secret.into();
+        let plaintext = vec![0x6b; 2_000_000];
+        let ciphertext =
+            crate::pgp_sign::encrypt_to_self(&public, &plaintext, "large.bin", false).unwrap();
+        let handoff =
+            crate::handoff::DecryptHandoff::create("passeport-pgp-", &ciphertext).unwrap();
+        let reader = handoff.start_reader();
+        let request = Request::PgpDecrypt {
+            ciphertext_path: handoff.ciphertext_path(),
+            plaintext_path: handoff.plaintext_path(),
+            client: None,
+            comment: None,
+        };
+        assert!(serde_json::to_vec(&request).unwrap().len() < 1_024);
+        run_pgp_decrypt_file(
+            &prf,
+            user_id,
+            &handoff.ciphertext_path(),
+            &handoff.plaintext_path(),
+        )
+        .unwrap();
+        assert_eq!(crate::handoff::join_reader(reader).unwrap(), plaintext);
     }
 
     #[test]

@@ -1,6 +1,8 @@
 mod age;
+mod age_cli;
 mod age_plugin;
 mod gpg;
+mod handoff;
 mod identity;
 mod minisign;
 mod minisign_cli;
@@ -81,6 +83,11 @@ fn main() {
     if matches!(prog, "minisign" | "passeport-minisign") {
         std::process::exit(minisign_cli::run(&args[1..]));
     }
+    // Invoked under an `age`/`passeport-age` name: encrypt publicly in-process
+    // and route decryption through the app's approval policy.
+    if matches!(prog, "age" | "passeport-age") {
+        std::process::exit(age_cli::run(&args[1..]));
+    }
 
     // age invokes the plugin as `age-plugin-passeport --age-plugin=<state>`.
     // We ship that name as a symlink to this binary, so dispatch on the flag.
@@ -103,6 +110,7 @@ fn main() {
         Some("revoke") => run_revoke(),
         Some("selftest") => run_selftest(),
         Some("age-recipient") => run_age_recipient(),
+        Some("age") => std::process::exit(age_cli::run(&args[2..])),
         Some("minisign") => std::process::exit(minisign_cli::run(&args[2..])),
         None => run(),
         Some(other) => Err(anyhow::anyhow!("unknown mode: {other}")),
@@ -182,18 +190,14 @@ fn derive_response(request: &DeriveRequest) -> Result<DeriveResponse> {
     })
 }
 
-/// `age-recipient`: read the encryption subkey's 32-byte X25519 public key as
-/// hex from stdin, print `{recipient, identity}` for age. No seed access — the
-/// app pipes the public point from its card cache.
+/// `age-recipient`: read a canonical `age1…` recipient from stdin and print it
+/// with Passeport's public plugin-identity handle. No seed access is needed.
 fn run_age_recipient() -> Result<()> {
     let mut input = String::new();
     io::stdin()
         .read_to_string(&mut input)
-        .context("failed to read public key from stdin")?;
-    let bytes = hex::decode(input.trim()).context("public key must be hex")?;
-    let public_key: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("public key must be 32 bytes"))?;
+        .context("failed to read age recipient from stdin")?;
+    let public_key = age::decode_recipient(input.trim()).context("invalid age recipient")?;
     let response = serde_json::json!({
         "recipient": age::encode_recipient(&public_key)?,
         "identity": age::encode_identity(&public_key)?,

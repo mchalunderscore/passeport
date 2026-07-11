@@ -1,11 +1,11 @@
-//! Crypto core for `age-plugin-passeport`: age's X25519 file-key wrap, plus
-//! the bech32 recipient/identity encodings.
+//! Crypto core shared by the native age CLI and `age-plugin-passeport`:
+//! standard age X25519 file-key wrapping plus public/plugin key encodings.
 //!
 //! Encryption is self-contained (ephemeral scalar + the recipient's public
 //! key). Decryption needs `scalar · ephemeral_share`, which only the seed
 //! holder can compute — the plugin obtains it from the Passeport app bridge's
 //! `ecdh` operation on the cv25519 encryption subkey (OPENPGP.2), Touch
-//! ID-gated. The wrap itself is byte-for-byte age's standard X25519 stanza, so
+//! approval-controlled. The wrap itself is byte-for-byte age's standard X25519 stanza, so
 //! there is no bespoke cryptography — only a bespoke key custodian.
 
 use anyhow::{Context, Result, bail};
@@ -18,10 +18,13 @@ use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 use zeroize::Zeroizing;
 
-/// Bech32 HRP for recipients: `age1passeport1…`.
-const RECIPIENT_HRP: &str = "age1passeport";
+/// Standard age X25519 recipient HRP: `age1…`.
+const RECIPIENT_HRP: &str = "age";
 /// Bech32 HRP for identities: `AGE-PLUGIN-PASSEPORT-1…` (uppercased on output).
 const IDENTITY_HRP: &str = "age-plugin-passeport-";
+/// Standard age X25519 secret-key HRP. This encoding is only constructed
+/// inside the gated op process and is never returned to the CLI.
+const SECRET_IDENTITY_HRP: &str = "age-secret-key-";
 
 /// The age file key is a fixed 16 bytes.
 pub const FILE_KEY_LEN: usize = 16;
@@ -37,6 +40,15 @@ pub fn encode_identity(public_key: &[u8; 32]) -> Result<String> {
     let hrp = Hrp::parse(IDENTITY_HRP).context("bad identity hrp")?;
     let lower = bech32::encode::<Bech32>(hrp, public_key).context("failed to encode identity")?;
     Ok(lower.to_uppercase())
+}
+
+/// Encode a standard age secret identity for the upstream age library. The
+/// caller must keep the result confined to the short-lived gated op process.
+pub fn encode_secret_identity(scalar: &[u8; 32]) -> Result<Zeroizing<String>> {
+    let hrp = Hrp::parse(SECRET_IDENTITY_HRP).context("bad secret identity hrp")?;
+    let encoded =
+        bech32::encode::<Bech32>(hrp, scalar).context("failed to encode secret identity")?;
+    Ok(Zeroizing::new(encoded.to_uppercase()))
 }
 
 pub fn decode_recipient(recipient: &str) -> Result<[u8; 32]> {
@@ -129,8 +141,22 @@ mod tests {
     fn recipient_roundtrips() {
         let pk = [7u8; 32];
         let encoded = encode_recipient(&pk).unwrap();
-        assert!(encoded.starts_with("age1passeport1"));
+        assert!(encoded.starts_with("age1"));
         assert_eq!(decode_recipient(&encoded).unwrap(), pk);
+    }
+
+    #[test]
+    fn standard_secret_identity_is_accepted_by_age_library() {
+        let scalar = [11u8; 32];
+        let encoded = encode_secret_identity(&scalar).unwrap();
+        let identity: age_lib::x25519::Identity = encoded.parse().unwrap();
+        assert_eq!(
+            decode_recipient(&identity.to_public().to_string()).unwrap(),
+            {
+                let secret = x25519_dalek::StaticSecret::from(scalar);
+                x25519_dalek::PublicKey::from(&secret).to_bytes()
+            }
+        );
     }
 
     #[test]

@@ -9,8 +9,8 @@
 #   scripts/make-dmg.sh
 #
 # Env (opt-in signing/notarization for real distribution):
-#   CODESIGN_IDENTITY   "Developer ID Application: …" — signs the bundled Helpers
-#                       (rage/rsign/passeport-core) with the hardened runtime and
+#   CODESIGN_IDENTITY   "Developer ID Application: …" — signs the bundled
+#                       passeport-core helper with the hardened runtime and
 #                       re-signs the app. Required before notarization.
 #   NOTARIZE=1          submit the signed app for notarization + staple.
 #   NOTARY_PROFILE      notarytool keychain profile name (see `xcrun notarytool
@@ -36,7 +36,10 @@ BUILD_ARGS=(
   -project "$ROOT/Passeport.xcodeproj"
   -scheme Passeport
   -configuration "$CONFIGURATION"
+  -destination "generic/platform=macOS"
   -derivedDataPath "$DERIVED_DATA"
+  "ARCHS=arm64 x86_64"
+  ONLY_ACTIVE_ARCH=NO
   CODE_SIGNING_ALLOWED=NO
   CODE_SIGNING_REQUIRED=NO
   CODE_SIGN_IDENTITY=
@@ -49,11 +52,12 @@ mkdir -p "$ROOT/dist"
 ditto "$BUILT" "$APP"
 [ -x "$(command -v xattr)" ] && xattr -cr "$APP" || true
 
-echo "==> Bundling permissive CLI toolchain (rage, rsign2) into Contents/Helpers"
-"$ROOT/scripts/bundle-tooling.sh" "$APP"
 [ -f "$ROOT/NOTICE" ] && cp "$ROOT/NOTICE" "$APP/Contents/Resources/NOTICE" || true
 
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+  echo "==> Signing passeport-core with the hardened runtime"
+  codesign --force --options runtime --timestamp -s "$CODESIGN_IDENTITY" \
+    "$APP/Contents/Helpers/passeport-core"
   echo "==> Signing app with the hardened runtime (preserving entitlements)"
   # The app was built unsigned (CODE_SIGNING_ALLOWED=NO), so no entitlements are
   # embedded. Regenerate the one entitlement the app declares —
@@ -79,8 +83,8 @@ EOF
   else
     echo "warning: could not derive Team ID / bundle id — signing WITHOUT keychain-access-groups; the seed keychain will be inaccessible on the distributed app. Use a 'Name (TEAMID)' Developer ID identity." >&2
   fi
-  # Helpers were already signed inside-out by bundle-tooling.sh; sign the app
-  # (main executable + bundle seal) WITHOUT --deep so their signatures are kept.
+  # The helper was signed inside-out above; sign the app (main executable +
+  # bundle seal) WITHOUT --deep so its signature is kept.
   codesign --force --options runtime --timestamp "${ENT_ARGS[@]}" -s "$CODESIGN_IDENTITY" "$APP"
   codesign --verify --strict --verbose=2 "$APP"
 

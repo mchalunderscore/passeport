@@ -14,6 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install universal Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
       - name: Extract version from tag
         id: release
         run: |
@@ -29,6 +32,14 @@ jobs:
           VERSION="${{ steps.release.outputs.version }}"
           mv dist/Passeport.dmg "dist/Passeport-$VERSION.dmg"
           shasum -a 256 "dist/Passeport-$VERSION.dmg" > "dist/Passeport-$VERSION.dmg.sha256"
+
+      - name: Verify universal Mach-O slices
+        run: |
+          APP="dist/Passeport.app"
+          test "$(lipo -archs "$APP/Contents/MacOS/Passeport")" = "x86_64 arm64" || \
+            test "$(lipo -archs "$APP/Contents/MacOS/Passeport")" = "arm64 x86_64"
+          test "$(lipo -archs "$APP/Contents/Helpers/passeport-core")" = "x86_64 arm64" || \
+            test "$(lipo -archs "$APP/Contents/Helpers/passeport-core")" = "arm64 x86_64"
 
       - name: Attach release artifacts
         uses: softprops/action-gh-release@v2

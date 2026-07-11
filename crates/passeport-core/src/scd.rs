@@ -7,7 +7,7 @@
 //!
 //! Private operations are delegated to a [`CryptoBackend`]. In production the
 //! backend is a Unix socket to the running Passeport app, which owns the seed
-//! and gates it behind Touch ID — the shim never sees key material. For
+//! and applies the app's approval policy — the shim never sees key material. For
 //! development, `PASSEPORT_SCD_PRF` selects an in-process backend.
 
 use std::cell::Cell;

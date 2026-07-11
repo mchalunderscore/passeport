@@ -9,6 +9,7 @@ enum PasseportError: LocalizedError {
     case identityLocked
     case passphraseRequired
     case incorrectPassphrase
+    case corruptPassphraseState
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +29,8 @@ enum PasseportError: LocalizedError {
             "This identity is protected by a passphrase. Enter it in Passeport to unlock."
         case .incorrectPassphrase:
             "That passphrase does not match this identity."
+        case .corruptPassphraseState:
+            "The saved passphrase verifier is missing or corrupt. Restore the identity from its recovery phrase and passphrase."
         }
     }
 }

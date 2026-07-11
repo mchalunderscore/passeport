@@ -49,3 +49,63 @@ final class ClassificationTests: XCTestCase {
         XCTAssertEqual(prompt?.hexPreview.count, 48)
     }
 }
+
+final class LegacyPassphraseMigrationTests: XCTestCase {
+    func testDisabledLegacyStateHasNoVerifier() {
+        XCTAssertNil(SeedStore.decodeLegacyVerifier(enabled: false, encoded: nil))
+    }
+
+    func testValidLegacyVerifierIsAccepted() {
+        let verifier = Data(repeating: 0x5a, count: 32)
+        XCTAssertEqual(
+            SeedStore.decodeLegacyVerifier(enabled: true, encoded: verifier.base64EncodedString()),
+            verifier
+        )
+    }
+
+    func testMissingAndMalformedLegacyVerifiersBecomeCorruptSentinel() {
+        XCTAssertEqual(SeedStore.decodeLegacyVerifier(enabled: true, encoded: nil), Data())
+        XCTAssertEqual(SeedStore.decodeLegacyVerifier(enabled: true, encoded: "not base64"), Data())
+        XCTAssertEqual(
+            SeedStore.decodeLegacyVerifier(enabled: true, encoded: Data([1, 2]).base64EncodedString()),
+            Data()
+        )
+        XCTAssertThrowsError(try SeedStore.validatePassphraseVerifier(Data())) { error in
+            guard case PasseportError.corruptPassphraseState = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+    }
+}
+
+final class OperationAuditLogTests: XCTestCase {
+    func testAtomicPersistenceAndObservableFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("passeport-audit-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let logURL = directory.appendingPathComponent("audit.json")
+        let event = OperationAuditEvent(
+            id: UUID(),
+            timestamp: Date(),
+            kind: "sign",
+            keyref: "OPENPGP.1",
+            requestingClient: "test",
+            byteCount: 32,
+            summary: "test",
+            details: "test",
+            outcome: "succeeded"
+        )
+        let log = OperationAuditLog(storageURL: logURL)
+        await log.append(event: event)
+        let initialWarning = await log.persistenceWarning()
+        XCTAssertNil(initialWarning)
+        XCTAssertEqual(try JSONDecoder().decode([OperationAuditEvent].self, from: Data(contentsOf: logURL)).count, 1)
+
+        let blocker = directory.appendingPathComponent("not-a-directory")
+        try Data().write(to: blocker)
+        let failingLog = OperationAuditLog(storageURL: blocker.appendingPathComponent("audit.json"))
+        await failingLog.append(event: event)
+        let failureWarning = await failingLog.persistenceWarning()
+        XCTAssertNotNil(failureWarning)
+    }
+}

@@ -4,18 +4,18 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: install-tooling.sh [--gnupg] [--age] [--bin-dir path]
+Usage: install-tooling.sh [--gnupg] [--bin-dir path]
 
-Install/deploy GnuPG and/or age into ~/.local/bin for use by Passeport.
+Install/deploy optional Mode 1 GnuPG into ~/.local/bin for use by Passeport.
 
 Options:
   --gnupg        Install/refresh only gnupg.
-  --age          Install/refresh only age.
   --bin-dir PATH Override the destination directory (default: ~/.local/bin).
   --help         Show this help text.
 
-If neither --gnupg nor --age is passed, both are installed (best effort).
-The script uses Homebrew for installation.
+Passeport provides its own age, minisign, and GNU-free gpg commands. This
+script only installs GnuPG for the optional smartcard-compatible Mode 1 path.
+It uses Homebrew for installation.
 EOF
 }
 
@@ -36,24 +36,6 @@ install_gnupg() {
     gpg-wks-server
     gpg-wks-client
     gpgsm
-  )
-  for tool in "${tools[@]}"; do
-    link_tool "${prefix}/bin/${tool}"
-  done
-}
-
-install_age() {
-  ensure_toolbox
-
-  if ! brew list --formula age >/dev/null 2>&1; then
-    brew install age
-  fi
-
-  local prefix
-  prefix="$(brew --prefix age)"
-  local tools=(
-    age
-    age-keygen
   )
   for tool in "${tools[@]}"; do
     link_tool "${prefix}/bin/${tool}"
@@ -98,19 +80,12 @@ link_tool() {
 main() {
   if [[ "${#}" -eq 0 ]]; then
     INSTALL_GNUPG=true
-    INSTALL_AGE=true
   fi
 
   while [[ "${#}" -gt 0 ]]; do
     case "${1}" in
       --gnupg)
         INSTALL_GNUPG=true
-        INSTALL_AGE=false
-        shift
-        ;;
-      --age)
-        INSTALL_AGE=true
-        INSTALL_GNUPG=false
         shift
         ;;
       --bin-dir)
@@ -133,16 +108,13 @@ main() {
     esac
   done
 
-  if [[ "${INSTALL_GNUPG:-false}" == "false" && "${INSTALL_AGE:-false}" == "false" ]]; then
-    echo "nothing requested, use --gnupg and/or --age" >&2
+  if [[ "${INSTALL_GNUPG:-false}" == "false" ]]; then
+    echo "nothing requested, use --gnupg" >&2
     exit 1
   fi
 
   if [[ "${INSTALL_GNUPG:-false}" == "true" ]]; then
     install_gnupg
-  fi
-  if [[ "${INSTALL_AGE:-false}" == "true" ]]; then
-    install_age
   fi
 
   if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
@@ -153,6 +125,4 @@ main() {
 
 BIN_DIR="${HOME}/.local/bin"
 INSTALL_GNUPG=false
-INSTALL_AGE=false
-
 main "$@"

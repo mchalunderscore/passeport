@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#6f1d2a">
+  <meta name="description" content="Passeport is a native macOS app that derives SSH, OpenPGP, age, and minisign keys from one recovery phrase.">
+  <title>Passeport</title>
+  <link rel="icon" href="assets/passeport.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <a class="wordmark" href="#top">
+      <span class="logo"><img src="assets/passeport.svg" alt=""></span>
+      Passeport
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="#features">Features</a>
+      <a href="#security">Security</a>
+      <a href="https://github.com/mchalunderscore/passeport">Source</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <p class="label">Identity keys for macOS</p>
+      <h1>One recovery phrase for your SSH and signing keys.</h1>
+      <p class="summary">Passeport derives stable SSH, OpenPGP, age, and minisign keys from a 24-word recovery phrase. The seed is stored locally in the macOS Keychain. Nothing is synced by Passeport.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/mchalunderscore/passeport/releases/latest">Download latest release</a>
+        <a class="button" href="https://github.com/mchalunderscore/passeport#build">Build from source</a>
+      </div>
+      <p class="note">Requires macOS 15 or later. Releases are currently unsigned.</p>
+    </section>
+
+    <section class="facts" aria-label="Project facts">
+      <div><strong>24 words</strong><span>BIP39 recovery phrase</span></div>
+      <div><strong>Device-local</strong><span>No Passeport account or cloud service</span></div>
+      <div><strong>Open source</strong><span>SwiftUI app with a Rust helper</span></div>
+    </section>
+
+    <section id="features">
+      <div class="section-title">
+        <p class="label">What it does</p>
+        <h2>Keys and integrations</h2>
+      </div>
+      <div class="feature-list">
+        <article>
+          <h3>SSH</h3>
+          <p>Derives an Ed25519 authentication key and serves it through Passeport’s native SSH agent.</p>
+        </article>
+        <article>
+          <h3>OpenPGP</h3>
+          <p>Provides signing and encryption keys through either a bundled GNU-free backend or an existing GnuPG installation.</p>
+        </article>
+        <article>
+          <h3>Git signing</h3>
+          <p>Configures Git to sign commits and tags using SSH or OpenPGP.</p>
+        </article>
+        <article>
+          <h3>age</h3>
+          <p>Installs <code>passeport-age</code> for public encryption and approval-controlled decryption.</p>
+        </article>
+        <article>
+          <h3>minisign</h3>
+          <p>Installs <code>passeport-minisign</code> for seed-derived signing and public verification.</p>
+        </article>
+        <article>
+          <h3>Recovery</h3>
+          <p>Restores the same derived identity on another Mac using the original 24-word phrase.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="how">
+      <div class="section-title">
+        <p class="label">How it works</p>
+        <h2>A local seed, not a hosted account</h2>
+      </div>
+      <div class="prose">
+        <p>Passeport generates a random 32-byte root seed. The seed is stored in the macOS Keychain and represented for backup as a standard BIP39 mnemonic. Separate key material is derived for each protocol with HKDF-SHA256.</p>
+        <p>Private operations are performed through the running app. Passeport can ask for confirmation on each operation and lock automatically when the Mac sleeps or becomes idle.</p>
+      </div>
+    </section>
+
+    <section id="security" class="security">
+      <div class="section-title">
+        <p class="label">Security model</p>
+        <h2>Understand the trade-off</h2>
+      </div>
+      <div class="prose">
+        <p>Passeport is intended to be more recoverable than a collection of unrelated key files. It is not a hardware security key: the seed exists on the Mac and can reconstruct every derived identity.</p>
+        <ul>
+          <li>Keep the recovery phrase offline.</li>
+          <li>Do not reuse a cryptocurrency wallet phrase.</li>
+          <li>Losing the phrase and the Mac means losing the identity.</li>
+          <li>Anyone who obtains the phrase can reconstruct the identity.</li>
+        </ul>
+        <a class="text-link" href="https://github.com/mchalunderscore/passeport/blob/main/DERIVATION.md">Read the derivation specification →</a>
+      </div>
+    </section>
+
+    <section class="install">
+      <div>
+        <p class="label">Get Passeport</p>
+        <h2>Download or build it.</h2>
+        <p>Passeport is under active development. Review the source and release notes before relying on it for important keys.</p>
+      </div>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/mchalunderscore/passeport/releases/latest">Latest release</a>
+        <a class="button" href="https://github.com/mchalunderscore/passeport">GitHub repository</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Passeport</span>
+    <div><a href="https://github.com/mchalunderscore/passeport/releases">Releases</a><a href="https://github.com/mchalunderscore/passeport/issues">Issues</a><a href="https://github.com/mchalunderscore/passeport">Source</a></div>
+  </footer>
+</body>
+</html>

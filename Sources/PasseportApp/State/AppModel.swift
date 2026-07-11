@@ -42,20 +42,22 @@ final class AppModel: ObservableObject {
     @Published private(set) var hasSeed: Bool
     @Published private(set) var status = "Ready"
     @Published private(set) var isBusy = false
-    @Published var showingPrivateMaterial = false
     @Published private(set) var bridgeRunning = false
     @Published private(set) var sshAgentRunning = false
-    @Published private(set) var ageRecipient: String?
-    @Published private(set) var minisignPublicKeyPath: String?
     @Published private(set) var gnuFreeGPGReady = false
     @Published var backgroundLauncherInstalled = LaunchAgentInstaller.isInstalled
     @Published private(set) var hasLocalGnuPG = false
-    @Published private(set) var hasLocalAge = false
     @Published var recoveryPhrase: String?
     @Published private(set) var contractWarning: String?
     @Published private(set) var gnupgStubWarning: String?
     @Published var launchAtLogin: Bool {
         didSet { applyLaunchAtLogin() }
+    }
+    @Published var hideDockIcon: Bool {
+        didSet {
+            UserDefaults.standard.set(hideDockIcon, forKey: Self.hideDockIconKey)
+            applyAppearancePolicy()
+        }
     }
     @Published var confirmEachOperation: Bool {
         didSet {
@@ -92,6 +94,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var operationAuditEvents: [OperationAuditEvent] = []
+    @Published private(set) var auditLogWarning: String?
     @Published var backupDrillSession: BackupDrillSession?
     @Published var passphraseRequest: PassphraseRequest?
     @Published private(set) var passphraseProtected = SeedStore.passphraseEnabled()
@@ -105,6 +108,7 @@ final class AppModel: ObservableObject {
     /// `isBusy` clears so the follow-up's own `runBusy` isn't rejected.
     private var pendingFollowUp: (() -> Void)?
     private static let pgpUserIDKey = "PasseportPGPUserID"
+    private static let hideDockIconKey = "PasseportHideDockIcon"
     private static let confirmEachOperationKey = "PasseportConfirmEachOperation"
     private static let requireTouchIDPerOperationKey = "PasseportRequireTouchIDPerOperation"
     private static let autoLockOnSleepKey = "PasseportAutoLockOnSleep"
@@ -121,6 +125,7 @@ final class AppModel: ObservableObject {
         savedPGPUserID = userID
         hasSeed = SeedStore.seedExists()
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        hideDockIcon = UserDefaults.standard.bool(forKey: Self.hideDockIconKey)
         confirmEachOperation = UserDefaults.standard.bool(forKey: Self.confirmEachOperationKey)
         requireTouchIDPerOperation = UserDefaults.standard.bool(forKey: Self.requireTouchIDPerOperationKey)
         autoLockOnSleep = UserDefaults.standard.bool(forKey: Self.autoLockOnSleepKey)
@@ -134,8 +139,19 @@ final class AppModel: ObservableObject {
         setupAutoLockMonitoring()
         startAutoLockTask()
         startOperationAuditObserver()
+        applyAppearancePolicy()
         Task {
             await self.refreshOperationAuditLog()
+        }
+    }
+
+    private func applyAppearancePolicy() {
+        let policy: NSApplication.ActivationPolicy = hideDockIcon ? .accessory : .regular
+        // Defer until AppKit has finished constructing the application during
+        // launch. Subsequent settings changes are applied on the next run-loop
+        // turn as well, avoiding activation-policy changes mid-view update.
+        DispatchQueue.main.async {
+            NSApplication.shared.setActivationPolicy(policy)
         }
     }
 
@@ -154,13 +170,11 @@ final class AppModel: ObservableObject {
     private func refreshLocalToolingAvailability() {
         // Resolving the login-shell PATH spawns a shell (cached after the first
         // call), so do it off the main thread to keep launch responsive.
-        Task.detached(priority: .utility) { [weak self] in
-            let gnupg = ToolingInstaller.hasGnuPG
-            let age = ToolingInstaller.hasRageOrAge
-            await MainActor.run {
-                self?.hasLocalGnuPG = gnupg
-                self?.hasLocalAge = age
-            }
+        Task { [weak self] in
+            let gnupg = await Task.detached(priority: .utility) {
+                ToolingInstaller.hasGnuPG
+            }.value
+            self?.hasLocalGnuPG = gnupg
         }
     }
 
@@ -241,7 +255,6 @@ final class AppModel: ObservableObject {
 
     private func lockAsync(reason: String? = nil) async {
         self.identity = nil
-        self.showingPrivateMaterial = false
         await SeedStore.clearCachedSeed()
         self.status = reason ?? "Locked"
     }
@@ -307,7 +320,6 @@ final class AppModel: ObservableObject {
             let seed = try await SeedStore.createRandomSeed()
             self.hasSeed = true
             self.identity = nil
-            self.showingPrivateMaterial = false
             if !passphrase.isEmpty {
                 try await SeedStore.enablePassphrase(passphrase)
             }
@@ -386,7 +398,6 @@ final class AppModel: ObservableObject {
             await MainActor.run {
                 self.hasSeed = false
                 self.identity = nil
-                self.showingPrivateMaterial = false
                 self.backupDrillSession = nil
                 self.passphraseProtected = SeedStore.passphraseEnabled()
                 self.status = "Seed removed from this Mac"
@@ -454,45 +465,39 @@ final class AppModel: ObservableObject {
     }
 
     /// Install `age-plugin-passeport` and surface the age recipient. Requires
-    /// the encryption key to be available (derive keys first).
-    func configureAge() {
-        guard identity != nil else {
-            status = "Derive keys first, then set up age"
+    /// the encryption key to be available (unlock the identity first).
+    func configureAge(installStandardAlias: Bool = false) {
+        guard let identity else {
+            status = "Unlock your identity first, then set up age"
             return
         }
-        guard ToolingInstaller.hasRageOrAge, let agePath = ToolingInstaller.ragePath else {
-            status = "Provide a `rage` binary (or `age`) on PATH before configuring age encryption."
-            return
-        }
+        let recipient = identity.age.recipient
         runBusy("Configuring age encryption") { [self] in
             // The plugin decrypts through the bridge, so make sure it is up.
             if !(await ScdBridge.shared.isRunning) {
                 try await ScdBridge.shared.start()
                 self.bridgeRunning = true
             }
-            guard let publicKeyHex = PublicCardCache.encryptionPublicKeyHex() else {
-                throw AgeConfigurator.AgeError.noEncryptionKey
-            }
             let helperPath = try CoreLocator.helperURL().path
             let socketPath = ScdBridge.socketURL.path
             let result: AgeConfigurator.Result = try await Task.detached(priority: .userInitiated) {
                 try AgeConfigurator.configure(
-                    encryptionPublicKeyHex: publicKeyHex,
+                    recipient: recipient,
                     helperPath: helperPath,
-                    socketPath: socketPath
+                    socketPath: socketPath,
+                    installStandardAlias: installStandardAlias
                 )
             }.value
-            self.ageRecipient = result.recipient
-            self.status = "\(agePath) ready — encrypt with `\(agePath) -r \(result.recipient)`, decrypt with `\(agePath) -d -i \(result.identityFilePath)`"
+            self.status = "passeport-age ready — encrypt with `passeport-age -e -r \(result.recipient)`, decrypt with `passeport-age -d`; external age/rage can use `-i \(result.identityFilePath)`"
         }
     }
 
     /// Install the minisign signing shim and write the public-key file. Signing
-    /// is seed-derived and routes through the bridge (Touch ID-gated); no
+    /// is seed-derived and routes through the bridge's approval policy; no
     /// external binary is needed — the installed `minisign` signs and verifies.
-    func configureMinisign() {
+    func configureMinisign(installStandardAlias: Bool = false) {
         guard let identity else {
-            status = "Derive keys first, then set up minisign signing"
+            status = "Unlock your identity first, then set up minisign signing"
             return
         }
         runBusy("Configuring minisign signing") { [self] in
@@ -507,11 +512,11 @@ final class AppModel: ObservableObject {
                 try MinisignConfigurator.configure(
                     publicKeyFile: publicKeyFile,
                     helperPath: helperPath,
-                    socketPath: socketPath
+                    socketPath: socketPath,
+                    installStandardAlias: installStandardAlias
                 )
             }.value
-            self.minisignPublicKeyPath = result.publicKeyPath
-            self.status = "minisign ready — sign with `minisign -Sm <file>`, verify with `minisign -Vm <file> -p \(result.publicKeyPath)`"
+            self.status = "passeport-minisign ready — sign with `passeport-minisign -Sm <file>`, verify with `passeport-minisign -Vm <file> -p \(result.publicKeyPath)`"
         }
     }
 
@@ -520,7 +525,7 @@ final class AppModel: ObservableObject {
     /// Mode 1 (scdaemon + the user's real gpg); this path uses no GnuPG binary.
     func configureGnuFreeGPG() {
         guard let identity else {
-            status = "Derive keys first, then set up GNU-free OpenPGP"
+            status = "Unlock your identity first, then set up GNU-free OpenPGP"
             return
         }
         runBusy("Configuring GNU-free OpenPGP (Mode 2)") { [self] in
@@ -595,7 +600,7 @@ final class AppModel: ObservableObject {
 
     func configureGnuPG() {
         guard let identity else {
-            status = "Derive keys first, then configure GnuPG"
+            status = "Unlock your identity first, then configure GnuPG"
             return
         }
         guard ToolingInstaller.hasGnuPG else {
@@ -646,7 +651,6 @@ final class AppModel: ObservableObject {
             PublicCardCache.clear()
             try await SeedStore.restoreSeed(seed)
             self.hasSeed = true
-            self.showingPrivateMaterial = false
             if !passphrase.isEmpty {
                 try await SeedStore.enablePassphrase(passphrase)
             }
@@ -713,7 +717,7 @@ final class AppModel: ObservableObject {
 
     func configureGitSigning() {
         guard let identity else {
-            status = "Derive keys first, then set up git signing"
+            status = "Unlock your identity first, then set up git signing"
             return
         }
         guard ToolingInstaller.hasGnuPG else {
@@ -735,7 +739,7 @@ final class AppModel: ObservableObject {
     /// native agent. Starts the agent if needed so signing works right away.
     func configureGitSigningSSH() {
         guard let identity else {
-            status = "Derive keys first, then set up git signing"
+            status = "Unlock your identity first, then set up git signing"
             return
         }
         let publicKey = identity.ssh.publicKey
@@ -751,6 +755,7 @@ final class AppModel: ObservableObject {
 
     func refreshOperationAuditLog() async {
         operationAuditEvents = await OperationAuditLog.shared.events(limit: 200)
+        auditLogWarning = await OperationAuditLog.shared.persistenceWarning()
     }
 
     func clearOperationAuditLog() {

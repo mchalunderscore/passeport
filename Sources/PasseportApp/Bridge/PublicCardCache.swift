@@ -25,14 +25,6 @@ enum PublicCardCache {
         return line
     }
 
-    /// The encryption subkey's 32-byte X25519 public key as hex, from the
-    /// cached decrypt slot (its `q` is the 0x40-prefixed compressed point).
-    /// This is the material an age recipient/identity encodes.
-    static func encryptionPublicKeyHex() -> String? {
-        guard let key = publicKey(role: "decrypt", inResponseLine: load()) else { return nil }
-        return Hex.encode(key)
-    }
-
     /// The raw 32-byte public key for the slot with the given role, parsed
     /// out of a `pubkeys` response line: finds the slot, validates the
     /// 0x40-prefixed 33-byte compressed point, and strips the prefix.

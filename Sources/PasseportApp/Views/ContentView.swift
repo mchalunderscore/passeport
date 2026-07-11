@@ -4,7 +4,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case keys = "Keys"
     case backup = "Backup & Recovery"
     case integrations = "Integrations"
-    case options = "Options"
+    case settings = "Settings"
 
     var id: String { rawValue }
 
@@ -13,7 +13,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .keys: "key.fill"
         case .backup: "lifepreserver"
         case .integrations: "terminal"
-        case .options: "gearshape"
+        case .settings: "gearshape"
         }
     }
 }
@@ -50,6 +50,19 @@ struct ContentView: View {
                 StatusBar()
             }
             .navigationTitle(section.rawValue)
+        }
+        .toolbar {
+            if #available(macOS 26.0, *) {
+                ToolbarItem(placement: .primaryAction) {
+                    IdentityToolbarControl()
+                        .padding(.trailing, 10)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    IdentityToolbarControl()
+                }
+            }
         }
         .sheet(item: Binding(
             get: { app.recoveryPhrase.map(RecoveryPhrase.init) },
@@ -91,7 +104,7 @@ struct ContentView: View {
         case .keys: KeysSection(showingRestore: $showingRestore)
         case .backup: BackupSection(showingRestore: $showingRestore)
         case .integrations: IntegrationsSection()
-        case .options: OptionsSection()
+        case .settings: SettingsSection()
         }
     }
 }
@@ -105,7 +118,7 @@ private struct RecoveryPhrase: Identifiable {
 private struct SidebarHeader: View {
     var body: some View {
         HStack(spacing: 9) {
-            Image("Symbolic")
+            Image("PasseportLogo")
                 .resizable()
                 .renderingMode(.template)
                 .scaledToFit()
@@ -144,20 +157,12 @@ private struct KeysSection: View {
                         HStack {
                             secretStatus
                             Spacer()
-                            HStack {
-                                Button {
-                                    app.deriveKeys()
-                                } label: {
-                                    Label("Derive Keys", systemImage: "lock.open")
-                                }
-                                .disabled(app.isBusy)
-                                Button(role: .destructive) {
-                                    confirmingReset = true
-                                } label: {
-                                    Label("Reset", systemImage: "arrow.counterclockwise")
-                                }
-                                .disabled(app.isBusy)
+                            Button(role: .destructive) {
+                                confirmingReset = true
+                            } label: {
+                                Label("Reset", systemImage: "arrow.counterclockwise")
                             }
+                            .disabled(app.isBusy)
                         }
                     } else {
                         onboarding
@@ -199,18 +204,28 @@ private struct KeysSection: View {
                     HStack {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Deriving identity from seed…")
+                        Text("Unlocking identity…")
                             .foregroundStyle(.secondary)
                             .font(.caption)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    ContentUnavailableView(
-                        "No Keys In Memory",
-                        systemImage: "lock",
-                        description: Text("Derive keys from your seed to see them here.")
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    GroupBox {
+                        VStack(spacing: 12) {
+                            Image(systemName: "lock.open.display")
+                                .font(.system(size: 30))
+                                .foregroundStyle(.secondary)
+                            Text("Your identity is locked")
+                                .font(.title3.weight(.semibold))
+                            Text("Unlock your protected identity when you need to view, export, or configure its public keys.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: 430)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 30)
+                    }
                 }
             } else if app.isBusy {
                 HStack {
@@ -226,6 +241,8 @@ private struct KeysSection: View {
             }
         }
         .padding(24)
+        .frame(maxWidth: 980, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     @ViewBuilder private var secretStatus: some View {
@@ -332,13 +349,13 @@ private struct BackupSection: View {
                 Spacer(minLength: 0)
             }
             .padding(24)
+            .frame(maxWidth: 980, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 }
 
 // MARK: - Integrations
-
-private enum IntegrationRow: Hashable { case ssh, openpgp, git, age, minisign }
 
 private enum OpenPGPBackend: String, CaseIterable, Identifiable {
     case bundled = "GNU-free (Bundled)"
@@ -354,31 +371,29 @@ private enum GitSigningMethod: String, CaseIterable, Identifiable {
 
 private struct IntegrationsSection: View {
     @EnvironmentObject private var app: AppModel
-    @State private var expanded: Set<IntegrationRow> = []
     @State private var openpgpBackend: OpenPGPBackend = .bundled
     @State private var gitMethod: GitSigningMethod = .ssh
+    @AppStorage("PasseportInstallStandardAgeAlias") private var installStandardAgeAlias = false
+    @AppStorage("PasseportInstallStandardMinisignAlias") private var installStandardMinisignAlias = false
 
     private var hasIdentity: Bool { app.identity != nil }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 20) {
                 statusHeader
-                labeledGroup("Serve your identity") {
-                    sshRow
-                    Divider()
-                    openpgpRow
-                }
-                labeledGroup("Set up an app to use it") {
-                    gitRow
-                    Divider()
-                    ageRow
-                    Divider()
-                    minisignRow
-                }
+                sectionHeader("Identity services", description: "Make your keys available to command-line tools and applications.")
+                sshCard
+                openpgpCard
+                sectionHeader("App integrations", description: "Configure tools to sign or encrypt with your Passeport identity.")
+                gitCard
+                ageCard
+                minisignCard
                 Spacer(minLength: 0)
             }
             .padding(24)
+            .frame(maxWidth: 980, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
@@ -386,114 +401,110 @@ private struct IntegrationsSection: View {
 
     private var statusHeader: some View {
         GroupBox {
-            HStack(spacing: 10) {
-                Image(systemName: "person.text.rectangle")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Your identity")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let fingerprint = app.identity?.pgp.fingerprint {
-                        Text(fingerprint.uppercased())
-                            .font(.system(.caption, design: .monospaced))
+            VStack(spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: hasIdentity ? "checkmark.seal.fill" : "lock")
+                        .font(.title3)
+                        .foregroundStyle(hasIdentity ? .green : .secondary)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hasIdentity ? "Identity ready" : "Identity locked")
+                            .font(.headline)
+                        Text(identitySummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                    } else {
-                        Text("No identity — derive your keys in the Keys tab")
-                            .font(.caption)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
                     }
+                    Spacer(minLength: 12)
                 }
-                Spacer(minLength: 12)
-                servicePill("SSH agent", running: app.sshAgentRunning) { app.toggleSSHAgent() }
-                servicePill("GnuPG bridge", running: app.bridgeRunning) { app.toggleBridge() }
+                Divider()
+                serviceRow("SSH Agent", description: "Serves your authentication key to SSH clients", running: app.sshAgentRunning) { app.toggleSSHAgent() }
+                Divider()
+                serviceRow("GnuPG Bridge", description: "Connects GnuPG to your Passeport identity", running: app.bridgeRunning) { app.toggleBridge() }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(6)
-        }
-    }
-
-    private func servicePill(_ label: String, running: Bool, toggle: @escaping () -> Void) -> some View {
-        Button(action: toggle) {
-            Label(label, systemImage: running ? "circle.inset.filled" : "circle")
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(running ? .green : .gray)
-        .disabled(app.isBusy)
-        .help(running ? "Running — click to stop" : "Stopped — click to start")
-    }
-
-    // MARK: - Group + row chrome
-
-    private func labeledGroup<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        GroupBox {
-            VStack(spacing: 0) { content() }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 6)
         } label: {
-            Text(title)
+            Label("Identity & Services", systemImage: "person.text.rectangle")
         }
     }
 
-    private func integrationRow<Leading: View, Trailing: View, Detail: View>(
-        _ row: IntegrationRow,
+    private var identitySummary: String {
+        app.identity?.pgp.fingerprint.uppercased() ?? "Unlock your identity above to configure integrations."
+    }
+
+    private func serviceRow(_ title: String, description: String, running: Bool, toggle: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(running ? Color.green : Color.secondary.opacity(0.35))
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(running ? "Running" : "Stopped")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button(running ? "Stop" : "Start", action: toggle)
+                .controlSize(.small)
+                .frame(minWidth: 52)
+        }
+        .disabled(app.isBusy)
+    }
+
+    private func sectionHeader(_ title: String, description: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+            Text(description)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
+    }
+
+    private func integrationCard<Actions: View, Detail: View>(
         icon: String,
         title: String,
         subtitle: String,
-        @ViewBuilder leading: () -> Leading,
-        @ViewBuilder trailing: () -> Trailing,
-        configure: @escaping () -> Void,
-        configureEnabled: Bool,
-        help: String,
+        disabledReason: String? = nil,
+        @ViewBuilder actions: () -> Actions,
         @ViewBuilder detail: () -> Detail
     ) -> some View {
-        let isOpen = expanded.contains(row)
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        if isOpen { expanded.remove(row) } else { expanded.insert(row) }
-                    }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 12)
-                        Image(systemName: icon)
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: icon)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26, height: 26)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.headline)
+                        Text(subtitle)
+                            .font(.callout)
                             .foregroundStyle(.secondary)
-                            .frame(width: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(title)
-                            Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                        }
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .contentShape(Rectangle())
+                    Spacer(minLength: 12)
+                    actions()
                 }
-                .buttonStyle(.plain)
-
-                leading()
-                Spacer(minLength: 8)
-                trailing()
-                Button("Configure", action: configure)
-                    .controlSize(.small)
-                    .disabled(!configureEnabled)
-                    .help(help)
-            }
-            .padding(.vertical, 12)
-
-            if isOpen {
-                VStack(alignment: .leading, spacing: 8) { detail() }
+                Divider()
+                VStack(alignment: .leading, spacing: 10) { detail() }
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 54)
-                    .padding(.trailing, 6)
-                    .padding(.bottom, 14)
+                if let disabledReason {
+                    Label(disabledReason, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .padding(6)
         }
     }
 
@@ -514,212 +525,283 @@ private struct IntegrationsSection: View {
         }
     }
 
-    // MARK: - Rows
+    // MARK: - Cards
 
-    private var sshRow: some View {
-        integrationRow(
-            .ssh, icon: "terminal", title: "SSH",
-            subtitle: "ssh uses your auth key directly",
-            leading: { EmptyView() },
-            trailing: {
+    private var sshCard: some View {
+        integrationCard(
+            icon: "terminal",
+            title: "SSH",
+            subtitle: "Authenticate with your Passeport key through the built-in SSH agent.",
+            actions: {
                 Button {
                     if let key = app.identity?.ssh.publicKey {
                         app.copy(key, label: "SSH public key")
                     }
                 } label: {
-                    Label("Copy key", systemImage: "doc.on.doc")
+                    Label("Copy Key", systemImage: "doc.on.doc")
                 }
                 .controlSize(.small)
                 .disabled(!hasIdentity)
+                Button("Configure") { app.configureSSH() }
+                    .controlSize(.small)
+                    .disabled(app.isBusy)
             },
-            configure: { app.configureSSH() },
-            configureEnabled: !app.isBusy,
-            help: "Point ~/.ssh/config at the Passeport agent.",
             detail: {
-                Text("A built-in ssh-agent serves your authentication subkey — no GnuPG needed. Configure points ~/.ssh/config at it; every signature still asks for approval per your settings.")
+                Text("Passeport serves the authentication subkey directly, with no GnuPG dependency. Each signature follows your approval settings.")
+                Label("Configure updates ~/.ssh/config to use the Passeport agent.", systemImage: "info.circle")
+                    .font(.caption)
             }
         )
     }
 
-    private var openpgpRow: some View {
+    private var openpgpCard: some View {
         let needsGnuPG = openpgpBackend == .scdaemon
         let enabled = !app.isBusy && hasIdentity && (!needsGnuPG || app.hasLocalGnuPG)
-        return integrationRow(
-            .openpgp, icon: "key", title: "OpenPGP",
-            subtitle: "sign and decrypt through gpg",
-            leading: { EmptyView() },
-            trailing: {
-                Picker("", selection: $openpgpBackend) {
+        let configureExplanation = switch openpgpBackend {
+        case .bundled:
+            "Configure installs the bundled gpg-compatible command in Application Support and ~/.local/bin, then points Git signing at it."
+        case .scdaemon:
+            "Configure updates ~/.gnupg/gpg-agent.conf, imports the public key, and connects your existing GnuPG agent to Passeport."
+        }
+        return integrationCard(
+            icon: "key",
+            title: "OpenPGP",
+            subtitle: "Sign and decrypt with a bundled GNU-free tool or your existing GnuPG installation.",
+            disabledReason: hasIdentity && needsGnuPG && !app.hasLocalGnuPG
+                ? "Pluggable Scdaemon requires a system `gpg` on PATH. Install GnuPG or choose GNU-free (Bundled)."
+                : nil,
+            actions: {
+                Button("Configure") {
+                    switch openpgpBackend {
+                    case .bundled: app.configureGnuFreeGPG()
+                    case .scdaemon: app.configureGnuPG()
+                    }
+                }
+                .controlSize(.small)
+                .disabled(!enabled)
+            },
+            detail: {
+                Picker("Backend", selection: $openpgpBackend) {
                     ForEach(OpenPGPBackend.allCases) { Text($0.rawValue).tag($0) }
                 }
-                .labelsHidden()
                 .pickerStyle(.menu)
-                .controlSize(.small)
-                .frame(width: 172)
-            },
-            configure: {
-                switch openpgpBackend {
-                case .bundled: app.configureGnuFreeGPG()
-                case .scdaemon: app.configureGnuPG()
-                }
-            },
-            configureEnabled: enabled,
-            help: helpText(needsGnuPG: needsGnuPG, action: "Set up the selected OpenPGP backend.", gnuPGNote: "Provide gpg on PATH for the scdaemon backend."),
-            detail: {
-                Text("GNU-free (Bundled) installs Passeport's self-contained gpg drop-in — no GnuPG binary, and its signatures still verify under standard gpg. Pluggable Scdaemon serves your identity to your existing gpg-agent as a virtual smartcard. They coexist; git uses whichever you point it at.")
+                .frame(maxWidth: 390, alignment: .leading)
+                Text("GNU-free installs Passeport's self-contained gpg-compatible command. Pluggable Scdaemon exposes the identity to your existing gpg-agent as a virtual smartcard.")
+                Label(configureExplanation, systemImage: "info.circle")
+                    .font(.caption)
                 if app.gnuFreeGPGReady {
-                    Label("git is signing with the GNU-free signer", systemImage: "checkmark.seal.fill")
+                    Label("GNU-free signer configured", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                 }
             }
         )
     }
 
-    private var gitRow: some View {
-        let needsGnuPG = gitMethod == .pgp
+    private var gitCard: some View {
+        let needsGnuPG = gitMethod == .pgp && openpgpBackend == .scdaemon
         let enabled = !app.isBusy && hasIdentity && (!needsGnuPG || app.hasLocalGnuPG)
-        return integrationRow(
-            .git, icon: "checkmark.seal", title: "Git commit signing",
-            subtitle: "shows as verified on GitHub",
-            leading: { EmptyView() },
-            trailing: {
-                Picker("", selection: $gitMethod) {
+        let configureExplanation = switch gitMethod {
+        case .ssh:
+            "Configure writes Passeport's signing key and allowed-signers files under ~/.ssh, then updates your global Git signing settings."
+        case .pgp:
+            "Configure updates your global Git signing settings to use the OpenPGP backend selected above."
+        }
+        return integrationCard(
+            icon: "checkmark.seal",
+            title: "Git commit signing",
+            subtitle: "Sign commits and tags so hosting services can display them as verified.",
+            disabledReason: hasIdentity && needsGnuPG && !app.hasLocalGnuPG
+                ? "PGP signing through Pluggable Scdaemon requires a system `gpg` on PATH. Install GnuPG or choose GNU-free (Bundled) above."
+                : nil,
+            actions: {
+                Button("Configure") {
+                    switch gitMethod {
+                    case .ssh: app.configureGitSigningSSH()
+                    case .pgp:
+                        switch openpgpBackend {
+                        case .bundled: app.configureGnuFreeGPG()
+                        case .scdaemon: app.configureGitSigning()
+                        }
+                    }
+                }
+                .controlSize(.small)
+                .disabled(!enabled)
+            },
+            detail: {
+                Picker("Signing method", selection: $gitMethod) {
                     ForEach(GitSigningMethod.allCases) { Text($0.rawValue).tag($0) }
                 }
-                .labelsHidden()
                 .pickerStyle(.menu)
-                .controlSize(.small)
-                .frame(width: 130)
-            },
-            configure: {
-                switch gitMethod {
-                case .ssh: app.configureGitSigningSSH()
-                case .pgp: app.configureGitSigning()
-                }
-            },
-            configureEnabled: enabled,
-            help: helpText(needsGnuPG: needsGnuPG, action: "Configure git to sign commits and tags.", gnuPGNote: "Provide gpg on PATH for PGP-based signing."),
-            detail: {
-                Text("SSH-based signs through the native agent (gpg.format=ssh) — no GnuPG. PGP-based signs with your OpenPGP key via gpg. Both show as Verified on GitHub.")
+                .frame(maxWidth: 330, alignment: .leading)
+                Text("SSH-based signing uses the native agent. PGP-based signing follows the OpenPGP backend selected above.")
+                Label(configureExplanation, systemImage: "info.circle")
+                    .font(.caption)
             }
         )
     }
 
-    private var ageRow: some View {
-        integrationRow(
-            .age, icon: "lock.doc", title: "File encryption",
-            subtitle: "age · encrypt to your key",
-            leading: { EmptyView() },
-            trailing: { EmptyView() },
-            configure: { app.configureAge() },
-            configureEnabled: !app.isBusy && hasIdentity && app.hasLocalAge,
-            help: !hasIdentity
-                ? "Derive your keys first to enable this."
-                : (!app.hasLocalAge ? "Provide age or rage to enable encryption." : "Install age-plugin-passeport and show your recipient."),
+    private var ageCard: some View {
+        integrationCard(
+            icon: "lock.doc",
+            title: "File encryption",
+            subtitle: "Encrypt standard age files to your Passeport recipient and decrypt them with approval.",
+            actions: {
+                Button("Configure") { app.configureAge(installStandardAlias: installStandardAgeAlias) }
+                    .controlSize(.small)
+                    .disabled(app.isBusy || !hasIdentity)
+            },
             detail: {
-                Text("Encrypt and decrypt files with age — decryption is Touch ID-gated through the app. Not interoperable with gpg encryption.")
-                if let recipient = app.ageRecipient {
+                Text("Passeport's age command handles decryption through the app. External age and rage tools can encrypt to the same recipient.")
+                Toggle("Also install as `age`", isOn: $installStandardAgeAlias)
+                    .toggleStyle(.checkbox)
+                Label("Configure installs `passeport-age` and the plugin in Application Support, links them into ~/.local/bin, and writes the public plugin identity file. The optional `age` alias never replaces a command Passeport does not own.", systemImage: "info.circle")
+                    .font(.caption)
+                if let recipient = app.identity?.age.recipient {
                     pathDetail(value: recipient, copyLabel: "age recipient")
                 }
             }
         )
     }
 
-    private var minisignRow: some View {
-        integrationRow(
-            .minisign, icon: "signature", title: "File signing",
-            subtitle: "minisign · sign and verify, GnuPG-free",
-            leading: { EmptyView() },
-            trailing: { EmptyView() },
-            configure: { app.configureMinisign() },
-            configureEnabled: !app.isBusy && hasIdentity,
-            help: hasIdentity
-                ? "Install the `minisign` command and write your public key."
-                : "Derive your keys first to enable this.",
+    private var minisignCard: some View {
+        integrationCard(
+            icon: "signature",
+            title: "File signing",
+            subtitle: "Sign and verify files with minisign, without depending on GnuPG.",
+            actions: {
+                Button("Configure") { app.configureMinisign(installStandardAlias: installStandardMinisignAlias) }
+                    .controlSize(.small)
+                    .disabled(app.isBusy || !hasIdentity)
+            },
             detail: {
-                Text("One `minisign` command: sign with `minisign -Sm <file>` (Touch ID-gated), verify with `minisign -Vm <file> -p <key>`. Anyone can verify with your public key — no GnuPG, no rsign2.")
-                if let path = app.minisignPublicKeyPath {
-                    pathDetail(value: path, copyLabel: "minisign public key path")
-                } else if let publicKey = app.identity?.minisign.publicKey {
-                    HStack(spacing: 10) {
-                        Text("Public key ready")
-                        Button {
-                            app.copy(publicKey, label: "minisign public key")
-                        } label: {
-                            Label("Copy key", systemImage: "doc.on.doc")
-                        }
-                        .controlSize(.small)
+                Text("Signatures require approval through Passeport. Anyone can verify them with the standard minisign command and your public key.")
+                Toggle("Also install as `minisign`", isOn: $installStandardMinisignAlias)
+                    .toggleStyle(.checkbox)
+                Label("Configure installs `passeport-minisign` in Application Support and ~/.local/bin, and writes the public key to ~/.minisign/passeport.pub. The optional `minisign` alias never replaces a command Passeport does not own.", systemImage: "info.circle")
+                    .font(.caption)
+                if let publicKey = app.identity?.minisign.publicKey {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Public key")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(publicKey)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(9)
+                            .background(.quaternary.opacity(0.35))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
             }
         )
     }
 
-    private func helpText(needsGnuPG: Bool, action: String, gnuPGNote: String) -> String {
-        if !hasIdentity { return "Derive your keys first to enable this." }
-        if needsGnuPG && !app.hasLocalGnuPG { return gnuPGNote }
-        return action
-    }
 }
 
-// MARK: - Options
+// MARK: - Settings
 
-private struct OptionsSection: View {
+struct SettingsSection: View {
     @EnvironmentObject private var app: AppModel
 
     var body: some View {
-        Form {
-            Section("Availability") {
-                Toggle("Start bridge at login", isOn: $app.launchAtLogin)
-                Toggle("Start Passeport on demand (background launcher)", isOn: Binding(
-                    get: { app.backgroundLauncherInstalled },
-                    set: { _ in app.toggleBackgroundLauncher() }
-                ))
-                .disabled(app.isBusy)
-            }
-            Section {
-                Toggle("Confirm each signature or decryption", isOn: $app.confirmEachOperation)
-                    Toggle("Require Touch ID for each operation", isOn: $app.requireTouchIDPerOperation)
-            } header: {
-                Text("Operation approval")
-            } footer: {
-                Text("Confirmation shows what is being signed before each operation — a check against a compromised gpg-agent using the key silently.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Section("Auto-lock") {
-                Toggle("Auto-lock when screen locks or sleeps", isOn: $app.autoLockOnSleep)
-                Toggle("Auto-lock after inactivity", isOn: $app.autoLockOnIdle)
-                Picker("Idle timeout", selection: $app.autoLockIdleMinutes) {
-                    Text("1 minute").tag(1)
-                    Text("2 minutes").tag(2)
-                    Text("5 minutes").tag(5)
-                    Text("10 minutes").tag(10)
-                    Text("15 minutes").tag(15)
-                    Text("30 minutes").tag(30)
-                    Text("60 minutes").tag(60)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                settingsCard("Appearance", systemImage: "menubar.rectangle") {
+                    Toggle("Hide Passeport from the Dock", isOn: $app.hideDockIcon)
+                    Text("Passeport remains available from the menu bar. Use Open Passeport there whenever you need the main window.")
+                        .settingsHelp()
                 }
-                .pickerStyle(.segmented)
-                .disabled(!app.autoLockOnIdle)
-            }
-            Section("Operation audit log") {
-                if app.operationAuditEvents.isEmpty {
-                    Text("No operations have been logged yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(app.operationAuditEvents) { event in
-                        OperationAuditRow(event: event)
+
+                settingsCard("Availability", systemImage: "power") {
+                    Toggle("Start bridge at login", isOn: $app.launchAtLogin)
+                    Toggle("Start Passeport on demand", isOn: Binding(
+                        get: { app.backgroundLauncherInstalled },
+                        set: { _ in app.toggleBackgroundLauncher() }
+                    ))
+                    .disabled(app.isBusy)
+                    Text("The background launcher opens Passeport when another app requests one of your keys.")
+                        .settingsHelp()
+                }
+
+                settingsCard("Operation approval", systemImage: "checkmark.shield") {
+                    Toggle("Confirm each signature or decryption", isOn: $app.confirmEachOperation)
+                    Toggle("Require Touch ID for each operation", isOn: $app.requireTouchIDPerOperation)
+                    Text("Confirmation shows what is being signed before each operation, protecting against a compromised client using the key silently.")
+                        .settingsHelp()
+                }
+
+                settingsCard("Auto-lock", systemImage: "lock") {
+                    Toggle("Auto-lock when screen locks or sleeps", isOn: $app.autoLockOnSleep)
+                    Toggle("Auto-lock after inactivity", isOn: $app.autoLockOnIdle)
+                    Picker("Idle timeout", selection: $app.autoLockIdleMinutes) {
+                        Text("1 minute").tag(1)
+                        Text("2 minutes").tag(2)
+                        Text("5 minutes").tag(5)
+                        Text("10 minutes").tag(10)
+                        Text("15 minutes").tag(15)
+                        Text("30 minutes").tag(30)
+                        Text("60 minutes").tag(60)
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(!app.autoLockOnIdle)
+                }
+
+                settingsCard("Operation audit log", systemImage: "list.bullet.rectangle") {
+                    if let warning = app.auditLogWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                    }
+                    if app.operationAuditEvents.isEmpty {
+                        ContentUnavailableView(
+                            "No Recorded Operations",
+                            systemImage: "checkmark.shield",
+                            description: Text("Approved and denied operations will appear here.")
+                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                    } else {
+                        ForEach(app.operationAuditEvents) { event in
+                            OperationAuditRow(event: event)
+                            if event.id != app.operationAuditEvents.last?.id { Divider() }
+                        }
+                    }
+                    HStack {
+                        Button("Refresh") { Task { await app.refreshOperationAuditLog() } }
+                        Spacer()
+                        Button("Clear Log", role: .destructive) { app.clearOperationAuditLog() }
+                            .disabled(app.operationAuditEvents.isEmpty)
                     }
                 }
-                HStack {
-                    Button("Refresh") { Task { await app.refreshOperationAuditLog() } }
-                    Button("Clear") { app.clearOperationAuditLog() }
-                        .foregroundStyle(.red)
-                }
             }
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .formStyle(.grouped)
+    }
+
+    private func settingsCard<Content: View>(
+        _ title: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) { content() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(6)
+        } label: {
+            Label(title, systemImage: systemImage)
+        }
+    }
+}
+
+private extension View {
+    func settingsHelp() -> some View {
+        font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -764,7 +846,7 @@ private struct OperationAuditRow: View {
 /// Explains why key-dependent actions are disabled until an identity exists.
 private struct RequiresKeysHint: View {
     var body: some View {
-        Label("Derive your keys first in the Keys tab to enable this.", systemImage: "info.circle")
+        Label("Unlock your identity to enable this.", systemImage: "info.circle")
             .font(.caption)
             .foregroundStyle(.secondary)
     }
@@ -787,40 +869,127 @@ private struct ContractWarningBanner: View {
     }
 }
 
+private struct IdentityToolbarControl: View {
+    @EnvironmentObject private var app: AppModel
+
+    @ViewBuilder
+    var body: some View {
+        if app.hasSeed {
+            let isLocked = app.identity == nil
+            identityButton(isLocked: isLocked)
+        }
+    }
+
+    @ViewBuilder
+    private func identityButton(isLocked: Bool) -> some View {
+        if #available(macOS 26.0, *) {
+            if isLocked {
+                Button {
+                    app.deriveKeys()
+                } label: {
+                    toolbarLabel(title: "Unlock", systemImage: "lock.open")
+                }
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .disabled(app.isBusy)
+                .help("Unlock identity")
+                .accessibilityLabel("Unlock identity")
+            } else {
+                Button {
+                    app.lock()
+                } label: {
+                    toolbarLabel(title: "Lock", systemImage: "lock")
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .disabled(app.isBusy)
+                .help("Lock identity")
+                .accessibilityLabel("Lock identity")
+            }
+        } else if isLocked {
+            Button {
+                app.deriveKeys()
+            } label: {
+                toolbarLabel(title: "Unlock", systemImage: "lock.open")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(app.isBusy)
+        } else {
+            Button {
+                app.lock()
+            } label: {
+                toolbarLabel(title: "Lock", systemImage: "lock")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(app.isBusy)
+        }
+    }
+
+    private func toolbarLabel(title: String, systemImage: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+            Text(title)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .fixedSize()
+    }
+}
+
 private struct StatusBar: View {
     @EnvironmentObject private var app: AppModel
 
     var body: some View {
-        HStack {
+        VStack(spacing: 0) {
+            Divider()
             HStack(spacing: 7) {
                 if app.isBusy {
-                    ProgressView().controlSize(.small)
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: statusIcon)
+                        .foregroundStyle(statusColor)
                 }
                 Text(app.status)
-                    .font(.callout)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .glassCapsule()
-            Spacer(minLength: 0)
+            .padding(.horizontal, 16)
+            .frame(height: 34)
+            .background(.bar)
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 14)
     }
-}
 
-extension View {
-    /// Liquid Glass capsule on macOS 26, material fallback on older systems.
-    @ViewBuilder func glassCapsule() -> some View {
-        if #available(macOS 26.0, *) {
-            glassEffect(.regular, in: Capsule())
-        } else {
-            background(.regularMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(.quaternary))
+    private var statusIcon: String {
+        let value = app.status.lowercased()
+        if value.contains("failed") || value.contains("error") || value.contains("could not") {
+            return "exclamationmark.triangle"
         }
+        if value.contains("denied") || value.contains("cancelled") {
+            return "xmark.circle"
+        }
+        if app.identity == nil || value.contains("locked") {
+            return "lock"
+        }
+        return "info.circle"
+    }
+
+    private var statusColor: Color {
+        let value = app.status.lowercased()
+        if value.contains("failed") || value.contains("error") || value.contains("could not") {
+            return .orange
+        }
+        if value.contains("denied") || value.contains("cancelled") {
+            return .red
+        }
+        return .secondary
     }
 }
 

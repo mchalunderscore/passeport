@@ -3,7 +3,7 @@
 //! Two phases. `recipient-v1` (encryption) is self-contained — it wraps each
 //! file key to the recipient's public key with no seed access. `identity-v1`
 //! (decryption) asks the Passeport app bridge to perform the X25519 ECDH on
-//! the encryption subkey (OPENPGP.2), which is Touch ID-gated, then opens the
+//! the encryption subkey (OPENPGP.2), subject to app approval, then opens the
 //! file key locally.
 //!
 //! Wire format is age's stanza framing: `-> command args\n` followed by
@@ -18,10 +18,10 @@ use base64::engine::general_purpose::STANDARD_NO_PAD;
 use crate::age;
 use crate::ops;
 
-/// The stanza type this plugin emits and recognizes. Distinct from age's
-/// native `X25519` so age routes decryption to us rather than trying it
-/// itself (it can't — the scalar lives in the Secure Enclave).
-const STANZA_TYPE: &str = "passeport-x25519";
+/// Passeport now uses the standard age X25519 recipient and stanza. The plugin
+/// identity remains useful to external age/rage clients: it unwraps the same
+/// standard stanza through the app bridge because the scalar is not on disk.
+const STANZA_TYPE: &str = "X25519";
 
 pub fn run(mode: &str) -> Result<()> {
     let stdin = std::io::stdin();
@@ -164,7 +164,7 @@ fn parse_recipient_stanza(stanza: &Stanza) -> Option<(usize, [u8; 32], Vec<u8>)>
 }
 
 /// Ask the app bridge for `scalar · share` on OPENPGP.2. The bridge gates the
-/// ECDH behind Touch ID / approval; the shared secret is all the plugin needs
+/// ECDH under the app's approval policy; the shared secret is all the plugin needs
 /// to open the file key locally.
 fn bridge_ecdh(share: &[u8; 32]) -> Result<[u8; 32]> {
     let path = std::env::var("PASSEPORT_SCD_SOCKET").unwrap_or_else(|_| default_socket_path());
@@ -310,7 +310,7 @@ mod tests {
     use x25519_dalek::{PublicKey, StaticSecret};
 
     /// Drive both phases end-to-end, simulating age's side of the protocol,
-    /// with a local scalar standing in for the Touch ID-gated bridge ECDH.
+    /// with a local scalar standing in for the approval-controlled bridge ECDH.
     #[test]
     fn full_encrypt_then_decrypt_roundtrip() {
         let scalar = StaticSecret::random_from_rng(rand::rngs::OsRng);
