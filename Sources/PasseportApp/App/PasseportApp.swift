@@ -70,6 +70,29 @@ private struct MenuBarContent: View {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
 
+        Menu("Copy Keys") {
+            Button("SSH Public Key") {
+                guard let identity = app.identity else { return }
+                app.copy(identity.ssh.publicKey, label: "SSH public key")
+            }
+
+            Button("OpenPGP Public Key") {
+                guard let identity = app.identity else { return }
+                app.copy(identity.pgp.publicKey, label: "OpenPGP public key")
+            }
+
+            Button("age Recipient") {
+                guard let identity = app.identity else { return }
+                app.copy(identity.age.recipient, label: "age recipient")
+            }
+
+            Button("minisign Public Key") {
+                guard let identity = app.identity else { return }
+                app.copy(identity.minisign.publicKey, label: "minisign public key")
+            }
+        }
+        .disabled(app.identity == nil)
+
         Button(app.sshAgentRunning ? "Stop SSH Agent" : "Start SSH Agent") {
             app.toggleSSHAgent()
         }
