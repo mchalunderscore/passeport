@@ -37,3 +37,16 @@ fi
 if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
   codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --timestamp=none "$HELPER_DST"
 fi
+
+# CFBundleVersion remains numeric for Apple tooling. Record source provenance
+# separately so diagnostics can identify the exact commit that produced a build.
+GIT_COMMIT="unknown"
+if command -v git >/dev/null 2>&1; then
+  GIT_COMMIT="$(git -C "$SRCROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+fi
+BUILT_INFO_PLIST="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+if [ -f "$BUILT_INFO_PLIST" ]; then
+  if ! /usr/libexec/PlistBuddy -c "Set :PasseportGitCommit $GIT_COMMIT" "$BUILT_INFO_PLIST" 2>/dev/null; then
+    /usr/libexec/PlistBuddy -c "Add :PasseportGitCommit string $GIT_COMMIT" "$BUILT_INFO_PLIST"
+  fi
+fi

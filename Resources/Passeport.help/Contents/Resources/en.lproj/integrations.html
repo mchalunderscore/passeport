@@ -1,0 +1,7 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="AppleTitle" content="Integrations"><meta name="description" content="Configure SSH OpenPGP Git age and Minisign"><title>Integrations</title><link rel="stylesheet" href="style.css"></head><body><a class="back" href="index.html">‹ Passeport Help</a><h1>Integrations</h1>
+<h2>SSH</h2><p>Configure adds Passeport’s agent to <code>~/.ssh/config</code>. The authentication key is served by the running app.</p>
+<h2>OpenPGP</h2><p>GNU-free installs <code>passeport-gpg</code>. Pluggable Scdaemon connects an existing GnuPG installation to Passeport. The optional <code>gpg</code> alias is installed only when Passeport can do so safely.</p>
+<h2>Git signing</h2><p>Choose SSH or OpenPGP signing. Passeport records the global Git values it replaces so Remove can restore them.</p>
+<h2>age and Minisign</h2><p><code>passeport-age</code> decrypts through the app. <code>passeport-minisign</code> signs through the app and verifies publicly. The Minisign public key is written to <code>~/.minisign/passeport.pub</code>.</p>
+<p>Test performs a real private operation followed by verification or decryption. It may request approval according to Settings.</p>
+</body></html>

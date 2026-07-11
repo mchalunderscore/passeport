@@ -71,7 +71,7 @@ struct OperationRequestMetadata {
 
         case "minisignsign":
             // A seed-derived minisign signature. Classified `.sign` so it gets
-            // the same approval + Touch ID + audit gating as any private
+            // the same unlock + approval + audit gating as any private
             // signing op (otherwise it would fall through to `.unknown` and be
             // refused). `prehash` is the 64-byte BLAKE2b digest being signed.
             let prehash = (decoded["prehash"] as? String).flatMap { Hex.decode($0) } ?? Data()

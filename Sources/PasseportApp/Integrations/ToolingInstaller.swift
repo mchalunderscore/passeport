@@ -1,7 +1,53 @@
 import Foundation
 
+enum IntegrationHealth: Equatable, Sendable {
+    case notConfigured
+    case working
+    case broken(String)
+
+    var title: String {
+        switch self {
+        case .notConfigured: "Not configured"
+        case .working: "Installed"
+        case .broken: "Configured but broken"
+        }
+    }
+}
+
+private func managedDirectory(_ name: String) -> URL {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Passeport", isDirectory: true)
+        .appendingPathComponent(name, isDirectory: true)
+}
+
+func managedCommandHealth(command: String, directory: String) -> IntegrationHealth {
+    let target = managedDirectory(directory).appendingPathComponent(command)
+    let link = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/\(command)")
+    let targetExists = FileManager.default.isExecutableFile(atPath: target.path)
+    let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+    guard targetExists || destination != nil else { return .notConfigured }
+    let resolved = destination.map { URL(fileURLWithPath: $0, relativeTo: link.deletingLastPathComponent()).standardized.path }
+    return targetExists && resolved == target.standardized.path
+        ? .working
+        : .broken("The managed command or its ~/.local/bin link is missing or points somewhere else.")
+}
+
+func removeManagedCommandLinks(names: [String], directory: String) throws {
+    let fm = FileManager.default
+    let managed = managedDirectory(directory)
+    let bin = fm.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin", isDirectory: true)
+    for name in names {
+        let link = bin.appendingPathComponent(name)
+        if let destination = try? fm.destinationOfSymbolicLink(atPath: link.path) {
+            let resolved = URL(fileURLWithPath: destination, relativeTo: bin).standardized.path
+            if resolved.hasPrefix(managed.standardized.path + "/") { try fm.removeItem(at: link) }
+        }
+    }
+    if fm.fileExists(atPath: managed.path) { try fm.removeItem(at: managed) }
+}
+
 /// Locates external CLI binaries that Passeport flows shell out to but does
-/// not itself provide (currently optional Mode 1 GnuPG). Passeport deliberately
+/// not itself provide (currently optional Pluggable Scdaemon GnuPG). Passeport deliberately
 /// ships no in-app installer: the user supplies these binaries via their package
 /// manager, the official installer, or `scripts/install-tooling.sh`, and keeps
 /// them on `PATH` (or in `~/.local/bin`, which the app also searches). This type

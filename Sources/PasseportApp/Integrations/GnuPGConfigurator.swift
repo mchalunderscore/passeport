@@ -18,6 +18,61 @@ enum ShellQuote {
 /// Application Support directory. Existing `gpg-agent.conf` content is backed
 /// up before modification and edits are idempotent.
 enum GnuPGConfigurator {
+    private struct ManagedState: Codable {
+        let previousScdaemonLine: String?
+        let addedSSHSupport: Bool
+        let managedScdaemonLine: String
+    }
+
+    private static var stateURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Passeport", isDirectory: true)
+            .appendingPathComponent("gnupg-managed-state.json")
+    }
+
+    static var health: IntegrationHealth {
+        let wrapper = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Passeport/passeport-scd")
+        let conf = gnupgHome().appendingPathComponent("gpg-agent.conf")
+        guard let body = try? String(contentsOf: conf, encoding: .utf8), body.contains("scdaemon-program") && body.contains("passeport-scd") else {
+            return .notConfigured
+        }
+        return FileManager.default.isExecutableFile(atPath: wrapper.path)
+            ? .working
+            : .broken("gpg-agent.conf points at Passeport, but the scdaemon wrapper is missing.")
+    }
+
+    static func remove() throws {
+        try requireReadableManagedState()
+        let conf = gnupgHome().appendingPathComponent("gpg-agent.conf")
+        if let body = try? String(contentsOf: conf, encoding: .utf8) {
+            let state = loadManagedState()
+            var lines = body.components(separatedBy: .newlines)
+            var removedManagedScdaemon = false
+            if let index = lines.firstIndex(where: {
+                let line = $0.trimmingCharacters(in: .whitespaces)
+                if let state { return line == state.managedScdaemonLine }
+                return line.hasPrefix("scdaemon-program") && line.contains("passeport-scd")
+            }) {
+                if let previous = state?.previousScdaemonLine { lines[index] = previous }
+                else { lines.remove(at: index) }
+                removedManagedScdaemon = true
+            }
+            if removedManagedScdaemon, state?.addedSSHSupport == true,
+               let index = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "enable-ssh-support" }) {
+                lines.remove(at: index)
+            }
+            try lines.joined(separator: "\n").write(to: conf, atomically: true, encoding: .utf8)
+        }
+        try? FileManager.default.removeItem(at: stateURL)
+        let wrapper = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Passeport/passeport-scd")
+        try? FileManager.default.removeItem(at: wrapper)
+        if let gpg = try? locateTool("gpg") {
+            let gpgconf = (try? locateTool("gpgconf")) ?? siblingTool(of: gpg, named: "gpgconf")
+            _ = try? run(gpgconf, ["--kill", "all"], home: gnupgHome())
+        }
+    }
     struct Result {
         let gpgPath: String
         let wrapperPath: String
@@ -29,6 +84,7 @@ enum GnuPGConfigurator {
     enum ConfigError: LocalizedError {
         case gpgNotFound
         case commandFailed(String, String)
+        case corruptManagedState
 
         var errorDescription: String? {
             switch self {
@@ -36,6 +92,8 @@ enum GnuPGConfigurator {
                 "Could not find the gpg binary. Install GnuPG, or set PASSEPORT_GPG to its path."
             case .commandFailed(let tool, let message):
                 "\(tool) failed: \(message)"
+            case .corruptManagedState:
+                "Passeport's saved GnuPG configuration snapshot is corrupt. No GnuPG configuration was changed; restore or remove gnupg-managed-state.json manually before trying again."
             }
         }
     }
@@ -113,6 +171,7 @@ enum GnuPGConfigurator {
     }
 
     private static func configureAgentConf(at url: URL, wrapperPath: String) throws {
+        try requireReadableManagedState()
         let fm = FileManager.default
         let existing = try? String(contentsOf: url, encoding: .utf8)
         if let existing {
@@ -122,8 +181,36 @@ enum GnuPGConfigurator {
                 try? existing.write(to: backup, atomically: true, encoding: .utf8)
             }
         }
+        if loadManagedState() == nil {
+            let lines = existing?.components(separatedBy: .newlines) ?? []
+            let previous = lines.first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("scdaemon-program") })
+            let hadSSHSupport = lines.contains { $0.trimmingCharacters(in: .whitespaces) == "enable-ssh-support" }
+            let state = ManagedState(
+                previousScdaemonLine: previous,
+                addedSSHSupport: !hadSSHSupport,
+                managedScdaemonLine: "scdaemon-program \(wrapperPath)"
+            )
+            try FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(state).write(to: stateURL, options: .atomic)
+        }
         let body = agentConfBody(existing: existing, wrapperPath: wrapperPath)
         try body.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private static func loadManagedState() -> ManagedState? {
+        guard let data = try? Data(contentsOf: stateURL) else { return nil }
+        return try? JSONDecoder().decode(ManagedState.self, from: data)
+    }
+
+    static func managedStateDataIsValid(_ data: Data) -> Bool {
+        (try? JSONDecoder().decode(ManagedState.self, from: data)) != nil
+    }
+
+    private static func requireReadableManagedState() throws {
+        guard FileManager.default.fileExists(atPath: stateURL.path) else { return }
+        guard let data = try? Data(contentsOf: stateURL), managedStateDataIsValid(data) else {
+            throw ConfigError.corruptManagedState
+        }
     }
 
     /// Pure transform: given the current gpg-agent.conf (if any), return the

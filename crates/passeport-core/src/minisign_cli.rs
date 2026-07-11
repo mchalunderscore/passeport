@@ -286,4 +286,29 @@ mod tests {
     fn generate_is_refused() {
         assert!(dispatch(&["-G".into()]).is_err());
     }
+
+    #[test]
+    fn value_flags_require_values() {
+        for flag in ["-m", "-x", "-p", "-P", "-c", "-t"] {
+            assert!(
+                Options::parse(&[flag.into()]).is_err(),
+                "{flag} accepted no value"
+            );
+        }
+    }
+
+    #[test]
+    fn input_prefers_explicit_message_over_positional() {
+        let opts = Options::parse(&["positional".into(), "-m".into(), "explicit".into()]).unwrap();
+        assert_eq!(opts.input_file().as_deref(), Some("explicit"));
+    }
+
+    #[test]
+    fn trusted_comment_parser_ignores_untrusted_and_malformed_lines() {
+        assert_eq!(
+            trusted_comment_of("untrusted comment: x\ntrusted comment: safe\nabc"),
+            Some("safe")
+        );
+        assert_eq!(trusted_comment_of("trusted comment:safe"), None);
+    }
 }

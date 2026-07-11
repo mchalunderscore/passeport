@@ -6,7 +6,7 @@ usage() {
   cat <<'EOF'
 Usage: install-tooling.sh [--gnupg] [--bin-dir path]
 
-Install/deploy optional Mode 1 GnuPG into ~/.local/bin for use by Passeport.
+Install optional GnuPG into ~/.local/bin for Passeport's Pluggable Scdaemon backend.
 
 Options:
   --gnupg        Install/refresh only gnupg.
@@ -14,7 +14,7 @@ Options:
   --help         Show this help text.
 
 Passeport provides its own age, minisign, and GNU-free gpg commands. This
-script only installs GnuPG for the optional smartcard-compatible Mode 1 path.
+script only installs GnuPG for the optional Pluggable Scdaemon backend.
 It uses Homebrew for installation.
 EOF
 }

@@ -5,7 +5,7 @@ import Foundation
 ///
 /// The shim (`passeport-core scd`, launched by gpg-agent) holds no key
 /// material; it connects here per operation. This bridge unlocks the seed
-/// behind Touch ID (once per session, via `SeedStore.prf`), then runs the
+/// behind the 25th-word vault unlock, then runs the
 /// requested Ed25519 sign / X25519 ECDH by shelling `passeport-core op` with
 /// the PRF supplied on stdin. The PRF never reaches the shim, only per-op
 /// results do.
@@ -24,17 +24,12 @@ final class ScdBridge {
     /// shows what is being signed — a defense against a compromised gpg-agent
     /// quietly using the key.
     private var confirmEachOperation = false
-    /// When set, Touch ID is re-requested for every operation rather than once
-    /// per session.
-    private var requireTouchIDPerOperation = false
-
     private init(userIDProvider: @escaping () -> String = { "Passeport <passeport@localhost>" }) {
         self.userIDProvider = userIDProvider
     }
 
-    func setPolicy(confirmEachOperation: Bool, requireTouchIDPerOperation: Bool) {
+    func setPolicy(confirmEachOperation: Bool) {
         self.confirmEachOperation = confirmEachOperation
-        self.requireTouchIDPerOperation = requireTouchIDPerOperation
     }
 
     nonisolated static var socketURL: URL {
@@ -168,7 +163,7 @@ final class ScdBridge {
     }
 
     /// Run one private-operation request through the full pipeline —
-    /// approval prompt, Touch ID policy, helper invocation, audit log — and
+    /// approval prompt, vault policy, helper invocation, audit log — and
     /// return the response line. Shared by the scd socket and the native
     /// SSH agent, so every key use funnels through the same controls.
     func process(requestLine: String) async -> String {
@@ -196,7 +191,7 @@ final class ScdBridge {
 
         // Public card metadata is not secret: serve it from the cache without
         // unlocking the seed or asking for approval, so routine gpg lookups
-        // never pop Touch ID.
+        // never request a vault unlock.
         if parsed.kind == .keyLookup, let cached = PublicCardCache.load() {
             await logAuditEvent(
                 kind: operation,
@@ -214,8 +209,8 @@ final class ScdBridge {
         // issues them while building the card, before any real key use, and
         // the ssh agent lists identities the same way. A lookup that misses
         // the cache may therefore only run when the identity is already
-        // unlocked; otherwise refuse cleanly instead of popping a passphrase
-        // panel or Touch ID from a background process.
+        // unlocked; otherwise refuse cleanly instead of popping a password
+        // panel or vault-unlock prompt from a background process.
         if parsed.kind == .keyLookup, !SeedStore.canDeriveSilently() {
             await logAuditEvent(
                 kind: operation,
@@ -246,12 +241,9 @@ final class ScdBridge {
                     return Self.errorJSON("operation denied by user")
                 }
             }
-            if requireTouchIDPerOperation, parsed.kind.requiresFreshSeedAuthorization {
-                try await SeedStore.requireFreshAuthorization()
-            }
-            // A passphrase identity that isn't unlocked yet (e.g. after
+            // A password-protected vault that isn't unlocked yet (e.g. after
             // auto-lock) must be unlocked before it can sign/decrypt. Prompt
-            // on demand, the way Touch ID surfaces for the seed read.
+            // on demand before accessing the encrypted vault.
             guard try await ensurePassphraseUnlocked() else {
                 await logAuditEvent(
                     kind: operation,
@@ -260,9 +252,9 @@ final class ScdBridge {
                     byteCount: byteCount,
                     summary: summary,
                     outcome: "denied",
-                    detail: "passphrase unlock cancelled"
+                    detail: "password unlock cancelled"
                 )
-                return Self.errorJSON("passphrase unlock cancelled")
+                return Self.errorJSON("password unlock cancelled")
             }
             let prf = try await SeedStore.prf(salt: SeedStore.rootSalt)
             responseLine = try Self.runOp(prf: prf, userID: userIDProvider(), request: requestLine)
@@ -320,11 +312,15 @@ final class ScdBridge {
         await MainActor.run { OperationApproval.present(prompt) }
     }
 
-    /// Ensure a passphrase identity is unlocked, prompting on demand and
-    /// retrying on a wrong passphrase. Returns false if the user cancels.
-    /// A no-passphrase identity needs nothing and returns true immediately.
+    /// Ensure a password-protected vault is unlocked, prompting on demand and
+    /// retrying on a wrong password. Returns false if the user cancels.
+    /// An already unlocked identity needs nothing and returns immediately.
     private func ensurePassphraseUnlocked() async throws -> Bool {
-        guard SeedStore.needsPassphrase() else { return true }
+        if SeedStore.canDeriveSilently() { return true }
+        if !SeedStore.passphraseEnabled() {
+            try await SeedStore.unlock(passphrase: "")
+            return true
+        }
         var errorMessage: String?
         while SeedStore.needsPassphrase() {
             let message = errorMessage

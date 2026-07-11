@@ -58,34 +58,11 @@ if [ -n "${CODESIGN_IDENTITY:-}" ]; then
   echo "==> Signing passeport-core with the hardened runtime"
   codesign --force --options runtime --timestamp -s "$CODESIGN_IDENTITY" \
     "$APP/Contents/Helpers/passeport-core"
-  echo "==> Signing app with the hardened runtime (preserving entitlements)"
-  # The app was built unsigned (CODE_SIGNING_ALLOWED=NO), so no entitlements are
-  # embedded. Regenerate the one entitlement the app declares —
-  # keychain-access-groups — with its build variables expanded, or the signed
-  # app cannot read the data-protection keychain holding the seed
-  # (errSecMissingEntitlement on cold launch). Xcode normally expands
-  # $(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER); do it by hand here.
-  TEAM_ID="$(printf '%s' "$CODESIGN_IDENTITY" | sed -n 's/.*(\([A-Z0-9]\{10\}\)).*/\1/p')"
-  BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2>/dev/null || true)"
-  ENT_ARGS=()
-  if [ -n "$TEAM_ID" ] && [ -n "$BUNDLE_ID" ]; then
-    ENT="$(mktemp -t passeport-entitlements).plist"
-    cat > "$ENT" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>keychain-access-groups</key>
-  <array><string>${TEAM_ID}.${BUNDLE_ID}</string></array>
-</dict></plist>
-EOF
-    ENT_ARGS=(--entitlements "$ENT")
-    echo "    entitlements: keychain-access-groups = ${TEAM_ID}.${BUNDLE_ID}"
-  else
-    echo "warning: could not derive Team ID / bundle id — signing WITHOUT keychain-access-groups; the seed keychain will be inaccessible on the distributed app. Use a 'Name (TEAMID)' Developer ID identity." >&2
-  fi
-  # The helper was signed inside-out above; sign the app (main executable +
-  # bundle seal) WITHOUT --deep so its signature is kept.
-  codesign --force --options runtime --timestamp "${ENT_ARGS[@]}" -s "$CODESIGN_IDENTITY" "$APP"
+  echo "==> Signing app with the hardened runtime"
+  # The helper was signed inside-out above; sign the app (main executable and
+  # bundle seal) without --deep so its signature is kept. Seed storage uses an
+  # encrypted file and therefore requires no restricted entitlement.
+  codesign --force --options runtime --timestamp -s "$CODESIGN_IDENTITY" "$APP"
   codesign --verify --strict --verbose=2 "$APP"
 
   if [ "${NOTARIZE:-0}" = "1" ]; then

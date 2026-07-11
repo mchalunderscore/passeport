@@ -105,10 +105,10 @@ pub enum Response {
         ok: bool,
         signature_file: String,
     },
-    PgpDecrypt {
-        ok: bool,
-    },
-    AgeDecrypt {
+    /// Both decrypt transports have the same wire acknowledgement. Keeping a
+    /// single variant avoids ambiguous deserialization of `{\"ok\":true}` in
+    /// this untagged response enum.
+    Decrypt {
         ok: bool,
     },
     Error {
@@ -269,7 +269,7 @@ pub fn run_op() -> Result<()> {
             plaintext_path,
             ..
         } => match run_pgp_decrypt_file(&prf, &envelope.user_id, ciphertext_path, plaintext_path) {
-            Ok(()) => Response::PgpDecrypt { ok: true },
+            Ok(()) => Response::Decrypt { ok: true },
             Err(error) => Response::Error {
                 ok: false,
                 error: format!("{error:#}"),
@@ -280,7 +280,7 @@ pub fn run_op() -> Result<()> {
             plaintext_path,
             ..
         } => match run_age_decrypt_file(&prf, &envelope.user_id, ciphertext_path, plaintext_path) {
-            Ok(()) => Response::AgeDecrypt { ok: true },
+            Ok(()) => Response::Decrypt { ok: true },
             Err(error) => Response::Error {
                 ok: false,
                 error: format!("{error:#}"),
@@ -559,5 +559,33 @@ mod tests {
         assert!(json.contains("deadbeef"));
         let back: Request = serde_json::from_str(&json).unwrap();
         matches!(back, Request::Sign { .. });
+    }
+
+    #[test]
+    fn request_json_rejects_unknown_operations_and_bad_hex() {
+        assert!(serde_json::from_str::<Request>(r#"{"op":"unknown"}"#).is_err());
+        assert!(
+            serde_json::from_str::<Request>(r#"{"op":"sign","keyref":"OPENPGP.1","data":"xyz"}"#)
+                .is_err()
+        );
+        assert!(
+            serde_json::from_str::<Request>(r#"{"op":"sign","keyref":"OPENPGP.1","data":"abc"}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn wrong_key_slot_is_rejected_without_fallback() {
+        let response = handle(
+            &seed(),
+            "Passeport Test <test@example.invalid>",
+            &Request::Sign {
+                keyref: "OPENPGP.99".into(),
+                data: b"payload".to_vec(),
+                client: None,
+                comment: None,
+            },
+        );
+        assert!(response.is_err());
     }
 }

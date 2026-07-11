@@ -107,6 +107,7 @@ private struct KeyField: View {
                         Label("Copy", systemImage: "doc.on.doc")
                     }
                     .controlSize(.small)
+                    .accessibilityLabel("Copy \(title)")
                 }
             }
             ScrollView {

@@ -6,7 +6,7 @@ import Foundation
 /// Only two requests are served — list identities (the auth subkey, read from
 /// the public-card cache without unlocking the seed) and sign. Every
 /// signature funnels through `ScdBridge.process`, i.e. the same approval
-/// prompt, Touch ID policy, and audit log as the GnuPG bridge.
+/// prompt, vault-unlock policy, and audit log as the GnuPG bridge.
 @SeedStoreActor
 final class SSHAgentServer {
     static let shared = SSHAgentServer()
@@ -161,7 +161,7 @@ final class SSHAgentServer {
     /// Bridges the connection thread into Swift concurrency and waits for
     /// the reply. Parking this thread on a semaphore is acceptable because
     /// it is a dedicated thread, not a cooperative-pool thread; the actual
-    /// work — approval prompt, Touch ID policy, signing — runs inside the
+    /// work — approval prompt, vault unlock, signing — runs inside the
     /// task on the actor.
     private nonisolated func respondFromThread(to message: Data) -> Data {
         let box = ReplyBox()

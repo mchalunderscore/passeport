@@ -24,6 +24,14 @@ enum AgeConfigurator {
         }
     }
 
+    static var health: IntegrationHealth {
+        managedCommandHealth(command: "passeport-age", directory: "age")
+    }
+
+    static func remove() throws {
+        try removeManagedCommandLinks(names: ["passeport-age", "age-plugin-passeport", "age"], directory: "age")
+    }
+
     /// Write the native CLI + optional plugin wrappers and return the public
     /// recipient/plugin identity strings.
     /// `recipient` is the canonical age1 value already displayed by the app;

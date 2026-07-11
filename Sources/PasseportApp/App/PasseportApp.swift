@@ -24,9 +24,15 @@ struct PasseportApp: App {
                 .task {
                     // Skip launch side effects when hosting unit tests.
                     guard NSClassFromString("XCTestCase") == nil else { return }
+#if DEBUG
+                    // Keep accessibility/UI audit builds deterministic and
+                    // independent of the user's identity vault and background agents.
+                    guard !CommandLine.arguments.contains("--accessibility-audit") else { return }
+#endif
                     appModel.refreshSeedPresence()
                     appModel.runContractSelfTest()
                     appModel.startBridgeIfNeeded()
+                    appModel.checkForUpdates()
                 }
         }
         .windowStyle(.titleBar)

@@ -2,6 +2,31 @@ import XCTest
 @testable import Passeport
 
 final class GnuPGConfiguratorTests: XCTestCase {
+    func testCorruptManagedSnapshotsAreRejected() {
+        let corrupt = Data("{not-json".utf8)
+        XCTAssertFalse(GitConfigurator.managedStateDataIsValid(corrupt))
+        XCTAssertFalse(GnuPGConfigurator.managedStateDataIsValid(corrupt))
+
+        let gitValid = Data(#"{"settings":[]}"#.utf8)
+        XCTAssertTrue(GitConfigurator.managedStateDataIsValid(gitValid))
+        let gnupgValid = Data(#"{"addedSSHSupport":true,"managedScdaemonLine":"scdaemon-program /tmp/passeport-scd"}"#.utf8)
+        XCTAssertTrue(GnuPGConfigurator.managedStateDataIsValid(gnupgValid))
+    }
+    func testGitRemovalSafetyRejectsOnlyConfiguredLegacyState() {
+        XCTAssertEqual(
+            GitConfigurator.removalSafety(hasManagedState: false, isConfigured: true),
+            .legacyStateUnknown
+        )
+        XCTAssertEqual(
+            GitConfigurator.removalSafety(hasManagedState: true, isConfigured: true),
+            .safe
+        )
+        XCTAssertEqual(
+            GitConfigurator.removalSafety(hasManagedState: false, isConfigured: false),
+            .safe
+        )
+    }
+
     func testAgentConfAddsBothDirectivesToEmpty() {
         let body = GnuPGConfigurator.agentConfBody(existing: nil, wrapperPath: "/x/passeport-scd")
         XCTAssertTrue(body.contains("scdaemon-program /x/passeport-scd"))
@@ -62,5 +87,48 @@ final class HexTests: XCTestCase {
     func testDecodeRejectsOddLengthAndNonHex() {
         XCTAssertNil(Hex.decode("abc"))
         XCTAssertNil(Hex.decode("zz"))
+    }
+}
+
+final class SSHConfiguratorTests: XCTestCase {
+    func testAddsManagedBlockWithoutDiscardingUserConfiguration() {
+        let existing = "Host work\n  IdentityFile ~/.ssh/work\n"
+        let body = SSHConfigurator.configBody(existing: existing, socketPath: "/tmp/passeport.sock")
+        XCTAssertTrue(body.contains(existing.trimmingCharacters(in: .newlines)))
+        XCTAssertTrue(body.contains("IdentityAgent \"/tmp/passeport.sock\""))
+    }
+
+    func testConfigurationIsIdempotentAndUpdatesSocket() {
+        let first = SSHConfigurator.configBody(existing: nil, socketPath: "/tmp/old.sock")
+        let second = SSHConfigurator.configBody(existing: first, socketPath: "/tmp/new.sock")
+        XCTAssertFalse(second.contains("/tmp/old.sock"))
+        XCTAssertEqual(second.components(separatedBy: "# Passeport ssh agent").count - 1, 1)
+        XCTAssertEqual(second.components(separatedBy: "IdentityAgent").count - 1, 1)
+    }
+
+    func testEmptyConfigurationHasNoLeadingBlankLines() {
+        let body = SSHConfigurator.configBody(existing: "\n\n", socketPath: "/tmp/p.sock")
+        XCTAssertTrue(body.hasPrefix("# Passeport"))
+        XCTAssertTrue(body.hasSuffix("\n"))
+    }
+}
+
+final class ShellQuoteTests: XCTestCase {
+    func testQuotesWhitespaceAndSingleQuotes() {
+        XCTAssertEqual(ShellQuote.quote("plain"), "'plain'")
+        XCTAssertEqual(ShellQuote.quote("a b"), "'a b'")
+        XCTAssertEqual(ShellQuote.quote("it's"), "'it'\\''s'")
+    }
+
+    func testQuotePreventsShellExpansion() {
+        XCTAssertEqual(ShellQuote.quote("$HOME; rm -rf /"), "'$HOME; rm -rf /'")
+    }
+}
+
+final class IntegrationHealthTests: XCTestCase {
+    func testTitlesDescribeEveryState() {
+        XCTAssertEqual(IntegrationHealth.notConfigured.title, "Not configured")
+        XCTAssertEqual(IntegrationHealth.working.title, "Installed")
+        XCTAssertEqual(IntegrationHealth.broken("x").title, "Configured but broken")
     }
 }

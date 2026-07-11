@@ -98,9 +98,9 @@ enum OperationApproval {
     }
 }
 
-/// Shows the passphrase-unlock panel modally and returns the entered
-/// passphrase, or nil if the user cancelled. Used when a private operation
-/// needs a passphrase identity that isn't unlocked yet.
+/// Shows the password-unlock panel modally and returns the entered password,
+/// or nil if the user cancelled. Used when a private operation needs a
+/// password-protected vault that isn't unlocked yet.
 @MainActor
 enum PassphraseUnlock {
     static func present(errorMessage: String?) -> String? {
@@ -143,20 +143,20 @@ enum PassphraseUnlock {
 
 private struct PassphrasePromptView: View {
     let errorMessage: String?
-    /// nil = cancelled, non-nil = the entered passphrase.
+    /// nil = cancelled, non-nil = the entered password.
     let onComplete: (String?) -> Void
     @State private var passphrase = ""
     @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Passphrase required", systemImage: "key.horizontal.fill")
+            Label("Password required", systemImage: "key.horizontal.fill")
                 .font(.headline)
-            Text("This identity is protected by a passphrase. Enter it to unlock for this operation.")
+            Text("This vault is password protected. Enter its password to unlock for this operation.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            SecureField("Passphrase", text: $passphrase)
+            SecureField("Password", text: $passphrase)
                 .textFieldStyle(.roundedBorder)
                 .focused($focused)
                 .onSubmit { if !passphrase.isEmpty { onComplete(passphrase) } }
@@ -181,18 +181,32 @@ private struct PassphrasePromptView: View {
     }
 }
 
+private struct PanelChromeModifier: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        if reduceTransparency {
+            content
+                .background(Color(nsColor: .windowBackgroundColor), in: shape)
+                .overlay(shape.strokeBorder(.separator, lineWidth: contrast == .increased ? 2 : 1))
+        } else if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content
+                .background(.regularMaterial)
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(.quaternary, lineWidth: contrast == .increased ? 2 : 1))
+        }
+    }
+}
+
 private extension View {
     /// Rounded Liquid Glass chrome for the borderless approval panel on
     /// macOS 26, with a material fallback on older systems.
     @ViewBuilder func panelChrome() -> some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        if #available(macOS 26.0, *) {
-            glassEffect(.regular, in: shape)
-        } else {
-            background(.regularMaterial)
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(.quaternary))
-        }
+        modifier(PanelChromeModifier())
     }
 }
 
@@ -217,6 +231,7 @@ struct OperationApprovalView: View {
                                 .font(.system(size: 27, weight: .semibold))
                                 .foregroundStyle(tint)
                         )
+                        .accessibilityHidden(true)
 
                     if !prompt.summary.isEmpty {
                         Text(prompt.summary)

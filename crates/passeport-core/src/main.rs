@@ -68,7 +68,7 @@ struct PgpOutput {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    // When invoked under a `gpg`/`passeport-gpg` name (Mode 2), behave as the
+    // When invoked under a `gpg`/`passeport-gpg` name, behave as the
     // self-contained OpenPGP CLI — git calls this binary as plain `gpg`.
     let prog = args
         .first()

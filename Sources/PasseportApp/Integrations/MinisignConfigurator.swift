@@ -5,6 +5,15 @@ import Foundation
 /// through the app bridge (approval-controlled, so the seed never leaves Passeport);
 /// verification is fully public and works on any minisign/rsign signature.
 enum MinisignConfigurator {
+    static var health: IntegrationHealth {
+        managedCommandHealth(command: "passeport-minisign", directory: "minisign")
+    }
+
+    static func remove() throws {
+        try removeManagedCommandLinks(names: ["passeport-minisign", "minisign"], directory: "minisign")
+        let publicKey = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".minisign/passeport.pub")
+        try? FileManager.default.removeItem(at: publicKey)
+    }
     struct Result {
         let publicKeyPath: String
         let programPath: String

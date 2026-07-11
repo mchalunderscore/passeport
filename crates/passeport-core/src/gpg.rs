@@ -1,10 +1,10 @@
 //! A self-contained, pure-Rust `gpg` drop-in for the single Passeport identity
-//! (Mode 2). It implements exactly the surface git + provisioning need —
+//! It implements exactly the surface git + provisioning need —
 //! detached signing, verifying OUR OWN signatures, public-key export, colon
 //! listing, and version — with the one private signing op delegated to the
 //! running app over the bridge socket. Anything requiring a third-party keyring
 //! or secret-key export is refused with a clear, non-zero error, never a faked
-//! success. See TODO / the gpg-cli-surface recon for the exact contract.
+//! success.
 
 use std::io::{Read, Write};
 use std::mem::ManuallyDrop;
@@ -110,10 +110,7 @@ fn cmd_sign(opts: &Options) -> Result<i32> {
         bail!("no matching local user for '{user}'");
     }
 
-    let mut payload = Vec::new();
-    std::io::stdin()
-        .read_to_end(&mut payload)
-        .context("failed to read payload from stdin")?;
+    let payload = read_input(opts, "payload")?;
 
     let socket = std::env::var("PASSEPORT_SCD_SOCKET")
         .context("PASSEPORT_SCD_SOCKET is unset — is the Passeport app running?")?;
@@ -155,10 +152,7 @@ fn cmd_encrypt(opts: &Options) -> Result<i32> {
             );
         }
     }
-    let mut plaintext = Vec::new();
-    std::io::stdin()
-        .read_to_end(&mut plaintext)
-        .context("failed to read plaintext from stdin")?;
+    let plaintext = read_input(opts, "plaintext")?;
 
     opts.status("BEGIN_ENCRYPTION 2 9");
     let output = pgp_sign::encrypt_to_self(&pubkey, &plaintext, "", opts.armor)?;
@@ -192,7 +186,7 @@ fn cmd_decrypt(opts: &Options) -> Result<i32> {
         comment: Some("decrypt an OpenPGP message".to_owned()),
     };
     let plaintext = match crate::ops::call_socket(&socket, &request) {
-        Ok(crate::ops::Response::PgpDecrypt { .. }) => crate::handoff::join_reader(reader)?,
+        Ok(crate::ops::Response::Decrypt { .. }) => crate::handoff::join_reader(reader)?,
         Ok(crate::ops::Response::Error { error, .. }) => {
             handoff.cancel_reader();
             let _ = crate::handoff::join_reader(reader);
@@ -336,7 +330,7 @@ fn cmd_version() -> Result<i32> {
     // A plausible banner so presence-checks and version greps succeed. Passeport
     // is not GnuPG, but tools key off the "gpg (GnuPG) 2.x" line.
     println!("gpg (GnuPG) 2.4.0");
-    println!("This is the Passeport self-contained OpenPGP signer (Mode 2).");
+    println!("This is the Passeport self-contained OpenPGP signer.");
     println!("Home: {}", home_dir_display());
     println!("Supported algorithms:");
     println!("Pubkey: EDDSA, ECDH");
@@ -410,7 +404,7 @@ fn bridge_sign(socket: &str, data: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Load our public key from `PASSEPORT_PGP_PUBKEY` (armored) or
-/// `<GNUPGHOME>/passeport-pubkey.asc`, written by the Mode 2 configurator.
+/// `<GNUPGHOME>/passeport-pubkey.asc`, written by the GNU-free configurator.
 fn load_public_key(opts: &Options) -> Result<SignedPublicKey> {
     if let Ok(armored) = std::env::var("PASSEPORT_PGP_PUBKEY") {
         let (key, _) = SignedPublicKey::from_armor_single(armored.as_bytes())
@@ -465,6 +459,24 @@ fn write_output(opts: &Options, bytes: &[u8]) -> Result<()> {
                 .write_all(bytes)
                 .context("failed to write to stdout")?;
             std::io::stdout().flush().context("failed to flush stdout")
+        }
+    }
+}
+
+/// Normal gpg commands accept either a positional input file or stdin. Git
+/// normally pipes signing input, while interactive use commonly supplies a
+/// filename; supporting both prevents a filename from being silently ignored.
+fn read_input(opts: &Options, description: &str) -> Result<Vec<u8>> {
+    match opts.positionals.first() {
+        Some(path) if path != "-" => {
+            std::fs::read(path).with_context(|| format!("cannot read {path}"))
+        }
+        _ => {
+            let mut input = Vec::new();
+            std::io::stdin()
+                .read_to_end(&mut input)
+                .with_context(|| format!("failed to read {description} from stdin"))?;
+            Ok(input)
         }
     }
 }
@@ -773,6 +785,20 @@ mod tests {
             opts.positionals,
             vec!["sig.asc".to_string(), "-".to_string()]
         );
+    }
+
+    #[test]
+    fn positional_signing_input_is_read_from_file() {
+        let path = std::env::temp_dir().join(format!(
+            "passeport-gpg-input-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(&path, b"not stdin").unwrap();
+        let args = vec!["--detach-sign".to_owned(), path.display().to_string()];
+        let opts = Options::parse(&args).unwrap();
+        assert_eq!(read_input(&opts, "payload").unwrap(), b"not stdin");
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

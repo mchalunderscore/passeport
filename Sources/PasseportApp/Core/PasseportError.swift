@@ -26,11 +26,11 @@ enum PasseportError: LocalizedError {
         case .identityLocked:
             "Passeport is locked. Open Passeport and derive or unlock your keys, then try again."
         case .passphraseRequired:
-            "This identity is protected by a passphrase. Enter it in Passeport to unlock."
+            "This vault is password protected. Enter its password in Passeport to unlock."
         case .incorrectPassphrase:
-            "That passphrase does not match this identity."
+            "That password does not unlock this vault."
         case .corruptPassphraseState:
-            "The saved passphrase verifier is missing or corrupt. Restore the identity from its recovery phrase and passphrase."
+            "The identity vault is corrupt. Restore the identity from its recovery phrase."
         }
     }
 }

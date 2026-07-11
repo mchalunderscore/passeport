@@ -1,0 +1,4 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="AppleTitle" content="Replace an identity"><meta name="description" content="Respond to a lost or compromised Passeport identity"><title>Replace an identity</title><link rel="stylesheet" href="style.css"></head><body><a class="back" href="index.html">‹ Passeport Help</a><h1>Replace an identity</h1>
+<p>If the recovery phrase or seed may be exposed, stop using the identity.</p><ol><li>Save and publish the old OpenPGP revocation certificate where appropriate.</li><li>Record every service that uses an old public key.</li><li>Create a replacement identity and verify its recovery phrase.</li><li>Repair each integration and replace registered keys on remote services.</li><li>Remove the old seed only after the replacement is recoverable.</li></ol>
+<p>Revoking OpenPGP does not revoke SSH, age, or Minisign keys. Replace those public keys separately wherever they were registered.</p>
+</body></html>

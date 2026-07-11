@@ -38,4 +38,4 @@ passeport-core — this project
     Copyright (c) Passeport authors
     Licensed under the MIT license.
     (Key derivation, scdaemon dialect, age/plugin CLI integration, the
-    self-contained `minisign` CLI, and the pure-Rust `gpg` drop-in for Mode 2.)
+    self-contained `minisign` CLI, and the pure-Rust `gpg` command.)

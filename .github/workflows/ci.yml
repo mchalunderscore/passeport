@@ -54,4 +54,5 @@ jobs:
             -scheme Passeport \
             -destination 'platform=macOS' \
             -resultBundlePath TestResults \
+            -only-testing:PasseportTests \
             CODE_SIGNING_ALLOWED=NO

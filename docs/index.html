@@ -26,12 +26,12 @@
     <section class="hero">
       <p class="label">Identity keys for macOS</p>
       <h1>One recovery phrase for your SSH and signing keys.</h1>
-      <p class="summary">Passeport derives stable SSH, OpenPGP, age, and minisign keys from a 24-word recovery phrase. The seed is stored locally in the macOS Keychain. Nothing is synced by Passeport.</p>
+      <p class="summary">Passeport derives stable SSH, OpenPGP, age, and minisign keys from a 24-word recovery phrase. The local seed vault can optionally be encrypted with a password. Nothing is synced by Passeport.</p>
       <div class="actions">
-        <a class="button primary" href="https://github.com/mchalunderscore/passeport/releases/latest">Download latest release</a>
-        <a class="button" href="https://github.com/mchalunderscore/passeport#build">Build from source</a>
+        <a class="button primary" href="https://github.com/mchalunderscore/passeport#build">Build from source</a>
+        <a class="button" href="https://github.com/mchalunderscore/passeport">View source</a>
       </div>
-      <p class="note">Requires macOS 15 or later. Releases are currently unsigned.</p>
+      <p class="note">Requires macOS 15 or later. Passeport currently follows a 0.x version series.</p>
     </section>
 
     <section class="facts" aria-label="Project facts">
@@ -79,7 +79,7 @@
         <h2>A local seed, not a hosted account</h2>
       </div>
       <div class="prose">
-        <p>Passeport generates a random 32-byte root seed. The seed is stored in the macOS Keychain and represented for backup as a standard BIP39 mnemonic. Separate key material is derived for each protocol with HKDF-SHA256.</p>
+        <p>Passeport generates a random 32-byte root seed and represents it for backup as a standard BIP39 mnemonic. The private local vault can optionally be encrypted with a password. Separate key material is derived for each protocol with HKDF-SHA256.</p>
         <p>Private operations are performed through the running app. Passeport can ask for confirmation on each operation and lock automatically when the Mac sleeps or becomes idle.</p>
       </div>
     </section>
@@ -104,11 +104,11 @@
     <section class="install">
       <div>
         <p class="label">Get Passeport</p>
-        <h2>Download or build it.</h2>
-        <p>Passeport is under active development. Review the source and release notes before relying on it for important keys.</p>
+        <h2>Build it from source.</h2>
+        <p>Passeport is under active development. Review the source before relying on it for important keys.</p>
       </div>
       <div class="actions">
-        <a class="button primary" href="https://github.com/mchalunderscore/passeport/releases/latest">Latest release</a>
+        <a class="button primary" href="https://github.com/mchalunderscore/passeport#build">Build instructions</a>
         <a class="button" href="https://github.com/mchalunderscore/passeport">GitHub repository</a>
       </div>
     </section>
@@ -117,7 +117,6 @@
   <footer>
     <span>Passeport</span>
     <div>
-      <a href="https://github.com/mchalunderscore/passeport/releases">Releases</a>
       <a href="https://github.com/mchalunderscore/passeport/issues">Issues</a>
       <a href="https://github.com/mchalunderscore/passeport">Source</a>
       <a href="https://www.svgrepo.com/svg/526073/passport">Logo: Solar Bold Icons</a>

@@ -2,6 +2,65 @@ import AppKit
 import Foundation
 import ServiceManagement
 
+enum PasseportIntegration: String, CaseIterable, Identifiable, Sendable {
+    case ssh = "SSH"
+    case openpgpBundled = "OpenPGP (Bundled)"
+    case openpgpScdaemon = "OpenPGP (Scdaemon)"
+    case git = "Git signing"
+    case age = "age"
+    case minisign = "minisign"
+    var id: String { rawValue }
+}
+
+struct AppIssue: Identifiable {
+    let id = UUID()
+    let summary: String
+    let details: String
+    let suggestion: String
+}
+
+struct UpdateNotice: Identifiable {
+    let version: String
+    let releaseURL: URL
+    var id: String { version }
+}
+
+struct SemanticVersion: Comparable, Equatable {
+    let major: Int
+    let minor: Int
+    let patch: Int
+
+    init?(_ tag: String) {
+        var value = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.first == "v" || value.first == "V" { value.removeFirst() }
+        guard !value.hasPrefix("-") else { return nil }
+        value = String(value.split(separator: "+", maxSplits: 1)[0])
+        value = String(value.split(separator: "-", maxSplits: 1)[0])
+        let components = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count == 3,
+              let major = Int(components[0]), major >= 0,
+              let minor = Int(components[1]), minor >= 0,
+              let patch = Int(components[2]), patch >= 0 else { return nil }
+        self.major = major
+        self.minor = minor
+        self.patch = patch
+    }
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        (lhs.major, lhs.minor, lhs.patch) < (rhs.major, rhs.minor, rhs.patch)
+    }
+}
+
+private struct GitHubRelease: Decodable {
+    let tagName: String
+    let htmlURL: URL
+
+    enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case htmlURL = "html_url"
+    }
+}
+
 private final class AppModelMonitorState: @unchecked Sendable {
     var auditLogObserver: NSObjectProtocol?
     var workspaceObservers: [NSObjectProtocol] = []
@@ -44,7 +103,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var bridgeRunning = false
     @Published private(set) var sshAgentRunning = false
-    @Published private(set) var gnuFreeGPGReady = false
     @Published var backgroundLauncherInstalled = LaunchAgentInstaller.isInstalled
     @Published private(set) var hasLocalGnuPG = false
     @Published var recoveryPhrase: String?
@@ -62,12 +120,6 @@ final class AppModel: ObservableObject {
     @Published var confirmEachOperation: Bool {
         didSet {
             UserDefaults.standard.set(confirmEachOperation, forKey: Self.confirmEachOperationKey)
-            applyBridgePolicy()
-        }
-    }
-    @Published var requireTouchIDPerOperation: Bool {
-        didSet {
-            UserDefaults.standard.set(requireTouchIDPerOperation, forKey: Self.requireTouchIDPerOperationKey)
             applyBridgePolicy()
         }
     }
@@ -98,6 +150,18 @@ final class AppModel: ObservableObject {
     @Published var backupDrillSession: BackupDrillSession?
     @Published var passphraseRequest: PassphraseRequest?
     @Published private(set) var passphraseProtected = SeedStore.passphraseEnabled()
+    @Published private(set) var integrationHealth: [PasseportIntegration: IntegrationHealth] = [:]
+    @Published private(set) var integrationsNeedingRepair: Set<PasseportIntegration> = []
+    @Published var presentedIssue: AppIssue?
+    @Published var updateNotice: UpdateNotice?
+    @Published private(set) var restoreCompletedID: UUID?
+    @Published var backupVerifiedAt: Date?
+    @Published var backupReminderDays: Int {
+        didSet { UserDefaults.standard.set(backupReminderDays, forKey: Self.backupReminderDaysKey) }
+    }
+    @Published var setupChecklistDismissed: Bool {
+        didSet { UserDefaults.standard.set(setupChecklistDismissed, forKey: Self.setupChecklistDismissedKey) }
+    }
 
     @Published private(set) var launchAtLoginFailure: String?
 
@@ -110,10 +174,14 @@ final class AppModel: ObservableObject {
     private static let pgpUserIDKey = "PasseportPGPUserID"
     private static let hideDockIconKey = "PasseportHideDockIcon"
     private static let confirmEachOperationKey = "PasseportConfirmEachOperation"
-    private static let requireTouchIDPerOperationKey = "PasseportRequireTouchIDPerOperation"
     private static let autoLockOnSleepKey = "PasseportAutoLockOnSleep"
     private static let autoLockOnIdleKey = "PasseportAutoLockOnIdle"
     private static let autoLockIdleMinutesKey = "PasseportAutoLockIdleMinutes"
+    private static let backupVerifiedAtKey = "PasseportBackupVerifiedAt"
+    private static let backupReminderDaysKey = "PasseportBackupReminderDays"
+    private static let setupChecklistDismissedKey = "PasseportSetupChecklistDismissed"
+    private static let integrationsNeedingRepairKey = "PasseportIntegrationsNeedingRepair"
+    private static let dismissedUpdateTagKey = "PasseportDismissedUpdateTag"
 
     private let monitorState = AppModelMonitorState()
     private var autoLockTask: Task<Void, Never>?
@@ -127,15 +195,23 @@ final class AppModel: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         hideDockIcon = UserDefaults.standard.bool(forKey: Self.hideDockIconKey)
         confirmEachOperation = UserDefaults.standard.bool(forKey: Self.confirmEachOperationKey)
-        requireTouchIDPerOperation = UserDefaults.standard.bool(forKey: Self.requireTouchIDPerOperationKey)
         autoLockOnSleep = UserDefaults.standard.bool(forKey: Self.autoLockOnSleepKey)
         autoLockOnIdle = UserDefaults.standard.bool(forKey: Self.autoLockOnIdleKey)
         let storedMinutes = UserDefaults.standard.integer(forKey: Self.autoLockIdleMinutesKey)
         autoLockIdleMinutes = storedMinutes > 0 ? storedMinutes : 10
+        backupVerifiedAt = UserDefaults.standard.object(forKey: Self.backupVerifiedAtKey) as? Date
+        let storedReminderDays = UserDefaults.standard.object(forKey: Self.backupReminderDaysKey) as? Int
+        backupReminderDays = storedReminderDays ?? 90
+        setupChecklistDismissed = UserDefaults.standard.bool(forKey: Self.setupChecklistDismissedKey)
+        let storedRepairs = UserDefaults.standard.stringArray(forKey: Self.integrationsNeedingRepairKey) ?? []
+        integrationsNeedingRepair = Set(storedRepairs.compactMap(PasseportIntegration.init(rawValue:)))
+        if storedRepairs.contains("OpenPGP") {
+            integrationsNeedingRepair.formUnion([.openpgpBundled, .openpgpScdaemon])
+        }
 
         refreshLocalToolingAvailability()
+        refreshIntegrationHealth()
         applyBridgePolicy()
-        applySeedStoragePolicy()
         setupAutoLockMonitoring()
         startAutoLockTask()
         startOperationAuditObserver()
@@ -178,6 +254,239 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshIntegrationHealth() {
+        Task { [weak self] in
+            let base = await Task.detached(priority: .utility) { Self.collectIntegrationHealth() }.value
+            guard let self else { return }
+            self.applyIntegrationHealth(base)
+        }
+    }
+
+    private nonisolated static func collectIntegrationHealth() -> [PasseportIntegration: IntegrationHealth] {
+        [
+            .ssh: SSHConfigurator.health,
+            .openpgpBundled: GnuFreeGPGConfigurator.health,
+            .openpgpScdaemon: GnuPGConfigurator.health,
+            .git: GitConfigurator.health,
+            .age: AgeConfigurator.health,
+            .minisign: MinisignConfigurator.health,
+        ]
+    }
+
+    private func applyIntegrationHealth(_ base: [PasseportIntegration: IntegrationHealth]) {
+        integrationHealth = base.mapValues { $0 }
+        for integration in integrationsNeedingRepair where base[integration] != .notConfigured {
+            integrationHealth[integration] = .broken("The identity changed after this integration was configured. Repair it to install the new public identity.")
+        }
+    }
+
+    func testIntegration(_ integration: PasseportIntegration) {
+        Task { [weak self] in
+            let base = await Task.detached(priority: .userInitiated) { Self.collectIntegrationHealth() }.value
+            guard let self else { return }
+            self.applyIntegrationHealth(base)
+            let health = self.integrationHealth[integration] ?? .notConfigured
+            switch health {
+            case .working:
+                guard let identity = self.identity else {
+                    self.presentIssue(summary: "Unlock before testing", details: "The live test performs a real private-key operation.", suggestion: "Unlock Passeport, then run Test again.")
+                    return
+                }
+                self.runBusy("Testing \(integration.rawValue)") {
+                    let result = try await Task.detached(priority: .userInitiated) {
+                        try IntegrationTester.run(
+                            integration,
+                            identity: identity,
+                            sshSocketPath: SSHAgentServer.socketURL.path
+                        )
+                    }.value
+                    self.status = result
+                }
+            case .notConfigured:
+                self.presentIssue(summary: "\(integration.rawValue) is not configured", details: "No Passeport-managed configuration was found.", suggestion: "Configure the integration first, then run the test again.")
+            case .broken(let detail):
+                self.presentIssue(summary: "\(integration.rawValue) needs repair", details: detail, suggestion: "Use Repair to recreate Passeport's managed files without replacing unrelated commands.")
+            }
+        }
+    }
+
+    func testPluggableGnuPG() {
+        switch pluggableGnuPGHealth {
+        case .working: testIntegration(.openpgpScdaemon)
+        case .notConfigured: presentIssue(summary: "Pluggable Scdaemon is not configured", details: "No Passeport scdaemon-program entry was found.", suggestion: "Choose Configure to connect GnuPG to Passeport.")
+        case .broken(let detail): presentIssue(summary: "Pluggable Scdaemon needs repair", details: detail, suggestion: "Choose Repair to recreate the managed wrapper and agent configuration.")
+        }
+    }
+
+    var pluggableGnuPGHealth: IntegrationHealth {
+        let base = GnuPGConfigurator.health
+        if integrationsNeedingRepair.contains(.openpgpScdaemon), base != .notConfigured {
+            return .broken("The identity changed after GnuPG was configured. Repair it to import the new public identity.")
+        }
+        return base
+    }
+
+    func removePluggableGnuPG() {
+        runBusy("Removing Pluggable Scdaemon configuration") { [self] in
+            try GnuPGConfigurator.remove()
+            integrationsNeedingRepair.remove(.openpgpScdaemon)
+            persistIntegrationsNeedingRepair()
+            status = "Removed Passeport's Pluggable Scdaemon configuration"
+        }
+    }
+
+    func removeIntegration(_ integration: PasseportIntegration) {
+        runBusy("Removing \(integration.rawValue) configuration") { [self] in
+            switch integration {
+            case .ssh: try SSHConfigurator.remove()
+            case .openpgpBundled: try GnuFreeGPGConfigurator.remove()
+            case .openpgpScdaemon: try GnuPGConfigurator.remove()
+            case .git: try GitConfigurator.remove()
+            case .age: try AgeConfigurator.remove()
+            case .minisign: try MinisignConfigurator.remove()
+            }
+            integrationsNeedingRepair.remove(integration)
+            persistIntegrationsNeedingRepair()
+            refreshIntegrationHealth()
+            status = "Removed Passeport's \(integration.rawValue) configuration"
+        }
+    }
+
+    func removeAllConfiguration() {
+        runBusy("Removing Passeport configuration") { [self] in
+            // Validate every known hard refusal before the first destructive
+            // step. In particular, legacy Git state must not turn a requested
+            // all-or-nothing cleanup into a predictable partial cleanup.
+            try GitConfigurator.preflightRemoval()
+            for integration in PasseportIntegration.allCases {
+                switch integration {
+                case .ssh: try SSHConfigurator.remove()
+                case .openpgpBundled: try GnuFreeGPGConfigurator.remove()
+                case .openpgpScdaemon: try GnuPGConfigurator.remove()
+                case .git: try GitConfigurator.remove()
+                case .age: try AgeConfigurator.remove()
+                case .minisign: try MinisignConfigurator.remove()
+                }
+            }
+            if LaunchAgentInstaller.isInstalled { try LaunchAgentInstaller.uninstall() }
+            backgroundLauncherInstalled = false
+            integrationsNeedingRepair.removeAll()
+            persistIntegrationsNeedingRepair()
+            refreshIntegrationHealth()
+            status = "Removed Passeport-managed configuration; the seed was kept"
+        }
+    }
+
+    func copyDiagnostics() {
+        Task { [weak self] in
+            let base = await Task.detached(priority: .utility) { Self.collectIntegrationHealth() }.value
+            guard let self else { return }
+            self.applyIntegrationHealth(base)
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "development"
+            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+            let commit = Bundle.main.infoDictionary?["PasseportGitCommit"] as? String ?? "unknown"
+            let integrations = PasseportIntegration.allCases.map { "\($0.rawValue): \(self.integrationHealth[$0]?.title ?? "Unknown")" }.joined(separator: "\n")
+            let text = """
+            Passeport \(version) (\(build))
+            Git commit: \(commit)
+            macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+            Seed present: \(self.hasSeed)
+            Identity unlocked: \(self.identity != nil)
+            Encrypted vault present: \(SeedStore.seedExists())
+            Bridge running: \(self.bridgeRunning)
+            SSH agent running: \(self.sshAgentRunning)
+            \(integrations)
+            """
+            self.copy(text, label: "diagnostics (no keys or secrets included)")
+        }
+    }
+
+    private func presentIssue(summary: String, details: String, suggestion: String) {
+        presentedIssue = AppIssue(summary: summary, details: details, suggestion: suggestion)
+        status = summary
+    }
+
+    func checkForUpdates(manual: Bool = false) {
+        if manual { status = "Checking GitHub for updates" }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let endpoint = URL(string: "https://api.github.com/repos/mchalunderscore/passeport/releases/latest")!
+                var request = URLRequest(url: endpoint)
+                request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+                request.setValue("Passeport/\(self.installedVersion)", forHTTPHeaderField: "User-Agent")
+                request.timeoutInterval = 12
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    throw PasseportError.bridgeFailed("GitHub did not return a release")
+                }
+                let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
+                guard let installed = SemanticVersion(self.installedVersion),
+                      let latest = SemanticVersion(release.tagName) else {
+                    throw PasseportError.bridgeFailed("GitHub returned a release tag that is not semantic versioning")
+                }
+                guard latest > installed else {
+                    if manual { self.status = "Passeport \(self.installedVersion) is up to date" }
+                    return
+                }
+                if !manual,
+                   UserDefaults.standard.string(forKey: Self.dismissedUpdateTagKey) == release.tagName {
+                    return
+                }
+                self.updateNotice = UpdateNotice(version: release.tagName, releaseURL: release.htmlURL)
+                self.status = "Passeport \(release.tagName) is available"
+            } catch {
+                guard manual else { return }
+                self.presentIssue(
+                    summary: "Could not check for updates",
+                    details: error.localizedDescription,
+                    suggestion: "Check your internet connection or visit the project website."
+                )
+            }
+        }
+    }
+
+    var installedVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+    }
+
+    var releaseCodename: String {
+        Bundle.main.infoDictionary?["PasseportReleaseCodename"] as? String ?? "Mi Goreng"
+    }
+
+    func openUpdate(_ notice: UpdateNotice) {
+        UserDefaults.standard.set(notice.version, forKey: Self.dismissedUpdateTagKey)
+        updateNotice = nil
+        NSWorkspace.shared.open(notice.releaseURL)
+    }
+
+    func dismissUpdate(_ notice: UpdateNotice) {
+        UserDefaults.standard.set(notice.version, forKey: Self.dismissedUpdateTagKey)
+        updateNotice = nil
+        status = "Update postponed"
+    }
+
+    private func markIntegrationRepaired(_ integrations: PasseportIntegration...) {
+        integrations.forEach { integrationsNeedingRepair.remove($0) }
+        persistIntegrationsNeedingRepair()
+    }
+
+    private func persistIntegrationsNeedingRepair() {
+        UserDefaults.standard.set(integrationsNeedingRepair.map(\.rawValue).sorted(), forKey: Self.integrationsNeedingRepairKey)
+    }
+
+    private func markInstalledIntegrationsForRepair() async {
+        integrationsNeedingRepair.formUnion(await installedIntegrations())
+        persistIntegrationsNeedingRepair()
+    }
+
+    private func installedIntegrations() async -> Set<PasseportIntegration> {
+        let configured = await Task.detached(priority: .utility) { Self.collectIntegrationHealth() }.value
+        var result = Set(configured.compactMap { $0.value == .notConfigured ? nil : $0.key })
+        if GnuPGConfigurator.health != .notConfigured { result.insert(.openpgpScdaemon) }
+        return result
+    }
+
     private static func loadPGPUserID() -> String {
         let saved = UserDefaults.standard.string(forKey: pgpUserIDKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -185,6 +494,20 @@ final class AppModel: ObservableObject {
             return saved
         }
         return defaultPGPUserID
+    }
+
+    nonisolated static func backupVerificationIsDue(
+        verifiedAt: Date?,
+        reminderDays: Int,
+        now: Date = Date()
+    ) -> Bool {
+        guard reminderDays > 0 else { return false }
+        guard let verifiedAt else { return true }
+        return now.timeIntervalSince(verifiedAt) >= TimeInterval(reminderDays * 86_400)
+    }
+
+    var backupVerificationIsDue: Bool {
+        Self.backupVerificationIsDue(verifiedAt: backupVerifiedAt, reminderDays: backupReminderDays)
     }
 
     /// True when the field differs from what is persisted.
@@ -205,21 +528,9 @@ final class AppModel: ObservableObject {
         hasSeed = SeedStore.seedExists()
     }
 
-    private func applySeedStoragePolicy() {
-        Task {
-            do {
-                try SeedStore.setSecureStorageEnabled(true)
-                hasSeed = SeedStore.seedExists()
-            } catch {
-                status = error.localizedDescription
-            }
-        }
-    }
-
     private func applyBridgePolicy() {
         let confirm = confirmEachOperation
-        let touch = requireTouchIDPerOperation
-        Task { await ScdBridge.shared.setPolicy(confirmEachOperation: confirm, requireTouchIDPerOperation: touch) }
+        Task { await ScdBridge.shared.setPolicy(confirmEachOperation: confirm) }
     }
 
     private func applyLaunchAtLogin() {
@@ -262,7 +573,7 @@ final class AppModel: ObservableObject {
     /// Onboarding: mint a fresh random seed, derive its keys, and surface the
     /// recovery phrase so the user backs it up right away (wallet-style). An
     /// existing seed just derives; a fresh one first asks for an optional
-    /// passphrase.
+    /// password.
     func createNewIdentity() {
         if identity != nil {
             status = "Keys already derived"
@@ -275,8 +586,7 @@ final class AppModel: ObservableObject {
         passphraseRequest = PassphraseRequest(purpose: .create)
     }
 
-    /// Derive from the seed already on this Mac. A passphrase identity prompts
-    /// for the passphrase first; otherwise it derives behind Touch ID.
+    /// Load the seed vault, prompting only when it has a password.
     func deriveKeys() {
         if identity != nil {
             status = "Keys already derived"
@@ -286,7 +596,7 @@ final class AppModel: ObservableObject {
             if await SeedStore.needsPassphrase() {
                 self.passphraseRequest = PassphraseRequest(purpose: .unlock)
             } else {
-                self.runDerive(status: "Keys derived from your seed")
+                self.runUnlock(passphrase: "")
             }
         }
     }
@@ -299,8 +609,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The user submitted (or skipped) a passphrase prompt. Empty means "no
-    /// passphrase" for create/restore; unlock requires a non-empty value.
+    /// The user submitted the optional vault-password prompt.
     func submitPassphrase(_ passphrase: String) {
         guard let request = passphraseRequest else { return }
         passphraseRequest = nil
@@ -318,18 +627,20 @@ final class AppModel: ObservableObject {
     private func runCreate(passphrase: String) {
         runBusy("Creating a new identity") { [self] in
             let seed = try await SeedStore.createRandomSeed()
-            self.hasSeed = true
             self.identity = nil
-            if !passphrase.isEmpty {
-                try await SeedStore.enablePassphrase(passphrase)
-            }
+            try await SeedStore.enablePassphrase(passphrase)
+            self.hasSeed = true
             self.passphraseProtected = SeedStore.passphraseEnabled()
             let phrase = try SeedBackup.recoveryPhrase(seed: seed)
             self.recoveryPhrase = phrase
+            self.backupVerifiedAt = nil
+            self.setupChecklistDismissed = false
+            UserDefaults.standard.removeObject(forKey: Self.backupVerifiedAtKey)
             try await self.deriveFromCachedSeed()
+            await self.markInstalledIntegrationsForRepair()
             self.status = passphrase.isEmpty
                 ? "New identity created — write down your recovery phrase"
-                : "New identity created — write down your recovery phrase and remember your passphrase (both are required to restore)"
+                : "New identity created — write down your recovery phrase and remember your vault password"
         }
     }
 
@@ -352,16 +663,21 @@ final class AppModel: ObservableObject {
     }
 
     /// Present the standard unlock sheet, resuming `retry` once the
-    /// passphrase is accepted. This is what keeps passphrase-gated actions
+    /// password is accepted. This keeps password-gated actions
     /// (e.g. saving the revocation certificate) reachable even when the keys
     /// are already derived but the session material is locked.
     private func requestUnlock(retry: @escaping (AppModel) -> Void) {
+        if !SeedStore.passphraseEnabled() {
+            pendingUnlockRetry = retry
+            runUnlock(passphrase: "")
+            return
+        }
         pendingUnlockRetry = retry
         passphraseRequest = PassphraseRequest(purpose: .unlock)
-        status = "Enter your passphrase to continue"
+        status = "Enter your password to continue"
     }
 
-    /// Unlock the seed (Touch ID once per session) and derive the identity.
+    /// Unlock the encrypted seed vault and derive the identity.
     private func deriveFromCachedSeed() async throws {
         let prf = try await SeedStore.prf(salt: SeedStore.rootSalt)
         let userID = self.pgpUserID.trimmedNonEmpty(defaultValue: "Passeport <passeport@localhost>")
@@ -371,7 +687,7 @@ final class AppModel: ObservableObject {
             sshComment: "passeport"
         )
         // The seed is unlocked anyway; refresh the public-card cache so gpg
-        // lookups won't need Touch ID later.
+        // lookups won't need to unlock the private vault later.
         await ScdBridge.refreshPublicCardCache(prf: prf, userID: userID)
         refreshGnuPGStubWarning()
     }
@@ -395,11 +711,15 @@ final class AppModel: ObservableObject {
         runBusy("Removing the seed") {
             try await SeedStore.deleteSeed()
             PublicCardCache.clear()
+            await self.markInstalledIntegrationsForRepair()
             await MainActor.run {
                 self.hasSeed = false
                 self.identity = nil
                 self.backupDrillSession = nil
                 self.passphraseProtected = SeedStore.passphraseEnabled()
+                self.backupVerifiedAt = nil
+                self.setupChecklistDismissed = false
+                UserDefaults.standard.removeObject(forKey: Self.backupVerifiedAtKey)
                 self.status = "Seed removed from this Mac"
             }
         }
@@ -488,6 +808,7 @@ final class AppModel: ObservableObject {
                     installStandardAlias: installStandardAlias
                 )
             }.value
+            self.markIntegrationRepaired(.age)
             self.status = "passeport-age ready — encrypt with `passeport-age -e -r \(result.recipient)`, decrypt with `passeport-age -d`; external age/rage can use `-i \(result.identityFilePath)`"
         }
     }
@@ -516,19 +837,20 @@ final class AppModel: ObservableObject {
                     installStandardAlias: installStandardAlias
                 )
             }.value
+            self.markIntegrationRepaired(.minisign)
             self.status = "passeport-minisign ready — sign with `passeport-minisign -Sm <file>`, verify with `passeport-minisign -Vm <file> -p \(result.publicKeyPath)`"
         }
     }
 
-    /// Configure GNU-free OpenPGP (Mode 2): install the self-contained gpg
+    /// Configure GNU-free OpenPGP: install the self-contained gpg
     /// drop-in wrapper and point git commit/tag signing at it. Coexists with
-    /// Mode 1 (scdaemon + the user's real gpg); this path uses no GnuPG binary.
-    func configureGnuFreeGPG() {
+    /// This path uses no GnuPG binary.
+    func configureGnuFreeGPG(installStandardAlias: Bool = false) {
         guard let identity else {
             status = "Unlock your identity first, then set up GNU-free OpenPGP"
             return
         }
-        runBusy("Configuring GNU-free OpenPGP (Mode 2)") { [self] in
+        runBusy("Configuring GNU-free OpenPGP") { [self] in
             if !(await ScdBridge.shared.isRunning) {
                 try await ScdBridge.shared.start()
                 self.bridgeRunning = true
@@ -541,16 +863,17 @@ final class AppModel: ObservableObject {
                 let configured = try GnuFreeGPGConfigurator.configure(
                     publicKeyArmored: publicKey,
                     helperPath: helperPath,
-                    socketPath: socketPath
+                    socketPath: socketPath,
+                    installStandardAlias: installStandardAlias
                 )
-                // Point git at the Mode 2 wrapper — GNU-free commit signing.
+                // Point Git at the GNU-free wrapper.
                 _ = try GitConfigurator.configure(
                     fingerprint: fingerprint,
                     gpgPath: configured.gpgProgramPath
                 )
                 return configured
             }.value
-            self.gnuFreeGPGReady = true
+            self.markIntegrationRepaired(.openpgpBundled, .git)
             self.status =
                 "GNU-free OpenPGP ready — git signs commits via \(result.gpgProgramPath), no GnuPG needed"
         }
@@ -562,6 +885,7 @@ final class AppModel: ObservableObject {
         runBusy("Configuring SSH") { [self] in
             try await self.ensureSSHAgentRunning()
             let result = try SSHConfigurator.configure(socketPath: SSHAgentServer.socketURL.path)
+            self.markIntegrationRepaired(.ssh)
             self.status = "SSH configured — ssh now uses the Passeport agent via \(result.configPath)"
         }
     }
@@ -622,6 +946,7 @@ final class AppModel: ObservableObject {
                     helperPath: helperPath
                 )
             }.value
+            self.markIntegrationRepaired(.openpgpScdaemon)
             self.status = "GnuPG configured. For SSH: export SSH_AUTH_SOCK=\(result.sshAuthSock)"
             self.refreshGnuPGStubWarning()
         }
@@ -640,22 +965,26 @@ final class AppModel: ObservableObject {
         recoveryPhrase = nil
     }
 
-    /// Restore an identity from its 24-word phrase and optional passphrase.
-    /// The passphrase is collected in the restore sheet itself (not a separate
-    /// prompt), so both parts arrive together.
+    /// Restore an identity from its 24-word phrase with an optional vault password.
     func restore(fromPhrase phrase: String, passphrase: String) {
         runBusy("Restoring from recovery phrase") { [self] in
             let seed = try SeedBackup.seed(fromPhrase: phrase)
-            // The restored seed may differ from the old one; a stale cache
-            // would advertise the wrong keys until re-derivation.
+            let prf = try await SeedStore.previewPRF(seed: seed, passphrase: passphrase, salt: SeedStore.rootSalt)
+            let userID = pgpUserID.trimmedNonEmpty(defaultValue: "Passeport <passeport@localhost>")
+            let replacement = try await core.derive(prf: prf, userID: userID, sshComment: "passeport")
+            let installed = await installedIntegrations()
+            try await SeedStore.commitRestoredIdentity(seed: seed, passphrase: passphrase)
             PublicCardCache.clear()
-            try await SeedStore.restoreSeed(seed)
             self.hasSeed = true
-            if !passphrase.isEmpty {
-                try await SeedStore.enablePassphrase(passphrase)
-            }
-            self.passphraseProtected = SeedStore.passphraseEnabled()
-            try await self.deriveFromCachedSeed()
+            self.identity = replacement
+            self.passphraseProtected = !passphrase.isEmpty
+            await ScdBridge.refreshPublicCardCache(prf: prf, userID: userID)
+            self.backupVerifiedAt = nil
+            self.setupChecklistDismissed = false
+            UserDefaults.standard.removeObject(forKey: Self.backupVerifiedAtKey)
+            integrationsNeedingRepair.formUnion(installed)
+            persistIntegrationsNeedingRepair()
+            restoreCompletedID = UUID()
             self.status = "Identity restored from your recovery phrase"
         }
     }
@@ -683,19 +1012,40 @@ final class AppModel: ObservableObject {
     func submitBackupDrill(answers: [String]) {
         runBusy("Verifying recovery drill") { [self] in
             guard let session = backupDrillSession else { return }
-            guard answers.count == session.expectedWords.count else {
+            guard let validation = Self.validateBackupDrill(answers: answers, session: session) else {
+                self.backupDrillSession = nil
+                self.backupVerifiedAt = Date()
+                UserDefaults.standard.set(self.backupVerifiedAt, forKey: Self.backupVerifiedAtKey)
+                self.status = "Backup drill passed — your stored phrase matches"
+                return
+            }
+            switch validation {
+            case .wrongAnswerCount:
                 throw PasseportError.bridgeFailed("all challenge words must be answered")
+            case .incorrectWord(let position):
+                self.backupDrillSession = session
+                throw PasseportError.bridgeFailed("Backup drill failed: word \(position + 1) is incorrect")
             }
-            for (offset, expected) in session.expectedWords.enumerated() {
-                let answer = answers[offset].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                if answer != expected {
-                    self.backupDrillSession = session
-                    throw PasseportError.bridgeFailed("Backup drill failed: word \(session.wordIndices[offset] + 1) is incorrect")
-                }
-            }
-            self.backupDrillSession = nil
-            self.status = "Backup drill passed — your stored phrase matches"
         }
+    }
+
+    enum BackupDrillFailure: Equatable {
+        case wrongAnswerCount
+        case incorrectWord(position: Int)
+    }
+
+    static func validateBackupDrill(
+        answers: [String],
+        session: BackupDrillSession
+    ) -> BackupDrillFailure? {
+        guard answers.count == session.expectedWords.count else { return .wrongAnswerCount }
+        for (offset, expected) in session.expectedWords.enumerated() {
+            let answer = answers[offset].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if answer != expected {
+                return .incorrectWord(position: session.wordIndices[offset])
+            }
+        }
+        return nil
     }
 
     func dismissBackupDrill() {
@@ -704,7 +1054,7 @@ final class AppModel: ObservableObject {
 
     func saveRevocationCertificate() {
         runBusy("Preparing revocation certificate") { [self] in
-            if await SeedStore.needsPassphrase() {
+            if !(await SeedStore.canDeriveSilently()) {
                 self.requestUnlock { $0.saveRevocationCertificate() }
                 return
             }
@@ -730,6 +1080,7 @@ final class AppModel: ObservableObject {
                 try GitConfigurator.configure(fingerprint: identity.pgp.fingerprint, gpgPath: gpgPath)
             }.value
             await MainActor.run {
+                self.markIntegrationRepaired(.git)
                 self.status = "git will now sign commits with \(result.signingKey.suffix(16))"
             }
         }
@@ -749,6 +1100,7 @@ final class AppModel: ObservableObject {
             let result: GitConfigurator.SSHSigningResult = try await Task.detached(priority: .userInitiated) {
                 try GitConfigurator.configureSSHSigning(publicKey: publicKey, sshAuthSock: socketPath)
             }.value
+            self.markIntegrationRepaired(.git)
             self.status = "git will sign commits with SSH via \(result.signingProgramPath) — no shell setup needed"
         }
     }
@@ -776,11 +1128,6 @@ final class AppModel: ObservableObject {
     func exportPublicBundle() {
         guard let identity else { return }
         save(text: identity.publicBundle, suggestedName: "passeport-public-keys.txt")
-    }
-
-    func exportPrivateBundle() {
-        guard let identity else { return }
-        save(text: identity.privateBundle, suggestedName: "passeport-private-keys.txt")
     }
 
     private func startOperationAuditObserver() {
@@ -880,8 +1227,14 @@ final class AppModel: ObservableObject {
         Task { @MainActor in
             do {
                 try await operation()
+                refreshIntegrationHealth()
             } catch {
                 status = error.localizedDescription
+                presentedIssue = AppIssue(
+                    summary: "The operation could not be completed",
+                    details: error.localizedDescription,
+                    suggestion: "Review the affected integration or identity state, then try again. Copy diagnostics from Settings if the problem continues."
+                )
             }
             isBusy = false
             if let followUp = pendingFollowUp {
@@ -903,6 +1256,11 @@ final class AppModel: ObservableObject {
             status = "Exported \(url.lastPathComponent)"
         } catch {
             status = error.localizedDescription
+            presentedIssue = AppIssue(
+                summary: "The export could not be saved",
+                details: error.localizedDescription,
+                suggestion: "Choose another writable destination and try again."
+            )
         }
     }
 }
@@ -913,15 +1271,15 @@ struct BackupDrillSession: Identifiable, Equatable {
     let expectedWords: [String]
 }
 
-/// Drives the passphrase-entry sheet. `create`/`restore` treat an empty entry
-/// as "no passphrase"; `unlock` requires the passphrase to open the identity.
+/// Drives the password-entry sheet. Creation treats an empty entry as no
+/// password; unlock requires the configured vault password.
 struct PassphraseRequest: Identifiable, Equatable {
     enum Purpose { case create, unlock }
     let id = UUID()
     let purpose: Purpose
 }
 
-private extension String {
+extension String {
     func trimmedNonEmpty(defaultValue: String) -> String {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? defaultValue : trimmed

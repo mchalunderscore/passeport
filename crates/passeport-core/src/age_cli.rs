@@ -255,7 +255,7 @@ fn decrypt_via_bridge(ciphertext: &[u8]) -> Result<Vec<u8>> {
         comment: Some("decrypt an age file".to_owned()),
     };
     match ops::call_socket(&path, &request) {
-        Ok(ops::Response::AgeDecrypt { .. }) => join_reader(reader),
+        Ok(ops::Response::Decrypt { .. }) => join_reader(reader),
         Ok(ops::Response::Error { error, .. }) => {
             handoff.cancel_reader();
             let _ = join_reader(reader);
@@ -306,5 +306,23 @@ mod tests {
         assert!(parse_args(&["-e".into()]).is_err());
         assert!(parse_args(&["-d".into(), "-e".into(), "-r".into(), "age1bad".into()]).is_err());
         assert!(parse_args(&["-d".into(), "-i".into(), "identity.txt".into()]).is_ok());
+    }
+
+    #[test]
+    fn parser_rejects_unknown_missing_and_duplicate_arguments() {
+        assert!(parse_args(&["-e".into(), "-r".into()]).is_err());
+        assert!(parse_args(&["-d".into(), "--unknown".into()]).is_err());
+        assert!(parse_args(&["-d".into(), "one.age".into(), "two.age".into()]).is_err());
+        assert!(parse_args(&["-d".into(), "-r".into(), "age1bad".into()]).is_err());
+    }
+
+    #[test]
+    fn output_creation_never_overwrites_existing_file() {
+        let path =
+            std::env::temp_dir().join(format!("passeport-age-output-{}", std::process::id()));
+        std::fs::write(&path, b"keep").unwrap();
+        assert!(open_output(Some(&path)).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep");
+        std::fs::remove_file(path).unwrap();
     }
 }

@@ -5,7 +5,7 @@ import Foundation
 ///
 /// gpg models the virtual card by asking for this metadata often — including
 /// right after launchd socket-activates the app in the background. Serving it
-/// from cache means those lookups need no seed unlock (no Touch ID prompt);
+/// from cache means those lookups need no encrypted-vault unlock;
 /// only actual sign/decrypt operations touch the seed.
 enum PublicCardCache {
     private static var fileURL: URL {

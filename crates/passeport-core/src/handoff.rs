@@ -95,7 +95,24 @@ impl DecryptHandoff {
     /// Unblock a reader when approval or the bridge fails before the helper
     /// opens the FIFO. Opening and immediately closing the write end yields EOF.
     pub fn cancel_reader(&self) {
-        let _ = OpenOptions::new().write(true).open(&self.plaintext_fifo);
+        // O_NONBLOCK still pairs with a reader waiting in open(2), but returns
+        // immediately with ENXIO if the reader already exited. A cleanup path
+        // must never turn an operation error into an indefinite hang.
+        for _ in 0..100 {
+            match OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&self.plaintext_fifo)
+            {
+                Ok(_) => return,
+                Err(error) if error.raw_os_error() == Some(libc::ENXIO) => {
+                    // The freshly spawned reader may not have entered open(2)
+                    // yet. Give it a bounded opportunity to do so.
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(_) => return,
+            }
+        }
     }
 }
 
@@ -165,5 +182,54 @@ mod tests {
         writer.join().unwrap().unwrap();
         assert_eq!(join_reader(reader).unwrap(), expected);
         assert!(!std::path::Path::new(&handoff.plaintext_path()).is_file());
+    }
+
+    #[test]
+    fn cancelling_without_a_reader_does_not_block() {
+        let handoff = DecryptHandoff::create("passeport-age-", b"ciphertext").unwrap();
+        handoff.cancel_reader();
+    }
+
+    #[test]
+    fn rejects_unowned_prefixes() {
+        assert!(validate_prefix("passeport-age-").is_ok());
+        assert!(validate_prefix("passeport-pgp-").is_ok());
+        assert!(validate_prefix("passeport-").is_err());
+        assert!(validate_prefix("../passeport-age-").is_err());
+    }
+
+    #[test]
+    fn dropping_handoff_removes_ciphertext_and_fifo() {
+        let (directory, ciphertext, fifo) = {
+            let handoff = DecryptHandoff::create("passeport-pgp-", b"secret ciphertext").unwrap();
+            (
+                handoff.directory.clone(),
+                handoff.ciphertext_path.clone(),
+                handoff.plaintext_fifo.clone(),
+            )
+        };
+        assert!(!directory.exists());
+        assert!(!ciphertext.exists());
+        assert!(!fifo.exists());
+    }
+
+    #[test]
+    fn concurrent_handoffs_are_unique_and_isolated() {
+        let handoffs: Vec<_> = (0..8)
+            .map(|index| DecryptHandoff::create("passeport-age-", &[index]).unwrap())
+            .collect();
+        let mut directories: Vec<_> = handoffs
+            .iter()
+            .map(|handoff| handoff.directory.clone())
+            .collect();
+        directories.sort();
+        directories.dedup();
+        assert_eq!(directories.len(), handoffs.len());
+        for (index, handoff) in handoffs.iter().enumerate() {
+            assert_eq!(
+                std::fs::read(&handoff.ciphertext_path).unwrap(),
+                [index as u8]
+            );
+        }
     }
 }

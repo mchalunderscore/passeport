@@ -57,4 +57,23 @@ enum SSHConfigurator {
         let head = lines.joined(separator: "\n")
         return (head.isEmpty ? "" : head + "\n\n") + block + "\n"
     }
+
+    static var health: IntegrationHealth {
+        let config = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh/config")
+        guard let body = try? String(contentsOf: config, encoding: .utf8), body.contains(marker) else {
+            return .notConfigured
+        }
+        return body.contains(SSHAgentServer.socketURL.path) ? .working : .broken("The SSH config points at an outdated Passeport socket.")
+    }
+
+    static func remove() throws {
+        let config = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh/config")
+        guard let existing = try? String(contentsOf: config, encoding: .utf8) else { return }
+        var lines = existing.components(separatedBy: .newlines)
+        if let index = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == marker }) {
+            lines.removeSubrange(index..<min(index + 3, lines.count))
+            while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
+            try (lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")).write(to: config, atomically: true, encoding: .utf8)
+        }
+    }
 }

@@ -31,6 +31,7 @@ struct ContentView: View {
                 List(AppSection.allCases, selection: $section) { item in
                     Label(item.rawValue, systemImage: item.icon)
                         .tag(item)
+                        .accessibilityLabel(item.rawValue)
                 }
                 .listStyle(.sidebar)
             }
@@ -89,6 +90,24 @@ struct ContentView: View {
             PassphraseSheet(request: request)
                 .environmentObject(app)
         }
+        .alert(item: $app.presentedIssue) { issue in
+            Alert(
+                title: Text(issue.summary),
+                message: Text("\(issue.details)\n\n\(issue.suggestion)"),
+                primaryButton: .default(Text("Copy Details")) {
+                    app.copy("\(issue.summary)\n\(issue.details)\nSuggested action: \(issue.suggestion)", label: "error details")
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .alert(item: $app.updateNotice) { notice in
+            Alert(
+                title: Text("Passeport \(notice.version) is available"),
+                message: Text("You are using Passeport \(app.installedVersion) “\(app.releaseCodename)”. Open the GitHub release page to review and download the new version."),
+                primaryButton: .default(Text("View Release")) { app.openUpdate(notice) },
+                secondaryButton: .cancel(Text("Later")) { app.dismissUpdate(notice) }
+            )
+        }
         .alert("Could not update login item", isPresented: $showingLaunchAtLoginFailure) {
             Button("OK", role: .cancel) { showingLaunchAtLoginFailure = false }
         } message: {
@@ -101,7 +120,7 @@ struct ContentView: View {
 
     @ViewBuilder private var detail: some View {
         switch section {
-        case .keys: KeysSection(showingRestore: $showingRestore)
+        case .keys: KeysSection(section: $section, showingRestore: $showingRestore)
         case .backup: BackupSection(showingRestore: $showingRestore)
         case .integrations: IntegrationsSection()
         case .settings: SettingsSection()
@@ -139,6 +158,8 @@ private struct SidebarHeader: View {
         .padding(.trailing, 12)
         .padding(.top, 10)
         .padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Passeport, phrase-derived identity")
     }
 }
 
@@ -146,11 +167,15 @@ private struct SidebarHeader: View {
 
 private struct KeysSection: View {
     @EnvironmentObject private var app: AppModel
+    @Binding var section: AppSection
     @Binding var showingRestore: Bool
     @State private var confirmingReset = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            if app.hasSeed && !app.setupChecklistDismissed {
+                SetupChecklist(section: $section)
+            }
             GroupBox {
                 VStack(alignment: .leading, spacing: 14) {
                     if app.hasSeed {
@@ -185,13 +210,9 @@ private struct KeysSection: View {
             } label: {
                 Label("Identity", systemImage: "person.text.rectangle")
             }
-            .confirmationDialog(
-                "Remove the seed from this Mac?",
-                isPresented: $confirmingReset
-            ) {
-                Button("Delete Seed", role: .destructive) { app.resetSeed() }
-            } message: {
-                Text("The seed is deleted from this Mac. Unless you have its 24-word recovery phrase, the derived keys can never be recreated.")
+            .sheet(isPresented: $confirmingReset) {
+                ResetSeedSheet()
+                    .environmentObject(app)
             }
 
             if app.hasSeed {
@@ -250,7 +271,7 @@ private struct KeysSection: View {
             Label("Seed present on this Mac", systemImage: "checkmark.seal.fill")
                 .foregroundStyle(.green)
             if app.passphraseProtected {
-                Label("Passphrase-protected (25th word)", systemImage: "key.horizontal.fill")
+                Label("Vault is password protected", systemImage: "key.horizontal.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -284,6 +305,59 @@ private struct KeysSection: View {
     }
 }
 
+private struct SetupChecklist: View {
+    @EnvironmentObject private var app: AppModel
+    @Binding var section: AppSection
+    @AppStorage("PasseportApprovalPolicyReviewed") private var approvalReviewed = false
+    @AppStorage("PasseportAutoLockPolicyReviewed") private var autoLockReviewed = false
+
+    private var configured: Bool { app.integrationHealth.values.contains(.working) }
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Finish setting up Passeport")
+                    .font(.headline)
+                checklistRow("Recovery phrase verified", complete: app.backupVerifiedAt != nil) { section = .backup }
+                checklistRow("Operation approval reviewed", complete: approvalReviewed) {
+                    approvalReviewed = true
+                    section = .settings
+                }
+                checklistRow("Auto-lock policy reviewed", complete: autoLockReviewed) {
+                    autoLockReviewed = true
+                    section = .settings
+                }
+                checklistRow("At least one integration configured", complete: configured) { section = .integrations }
+                HStack {
+                    Spacer()
+                    Button("Dismiss") { app.setupChecklistDismissed = true }
+                        .controlSize(.small)
+                }
+            }
+            .padding(6)
+        } label: {
+            Label("Setup checklist", systemImage: "checklist")
+        }
+    }
+
+    private func checklistRow(_ title: String, complete: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: complete ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(complete ? .green : .secondary)
+                Text(title)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(complete ? "Complete" : "Incomplete")
+        .accessibilityHint("Opens the relevant setup page")
+    }
+}
+
 // MARK: - Backup
 
 private struct BackupSection: View {
@@ -299,6 +373,17 @@ private struct BackupSection: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let verified = app.backupVerifiedAt, !app.backupVerificationIsDue {
+                            Label("Recovery phrase verified \(verified.formatted(date: .abbreviated, time: .shortened))", systemImage: "checkmark.shield.fill")
+                                .foregroundStyle(.green)
+                        } else if let verified = app.backupVerifiedAt {
+                            Label("Recovery phrase verification is due — last checked \(verified.formatted(date: .abbreviated, time: .omitted))", systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        } else {
+                            Label("Recovery phrase has not been verified", systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
 
                         HStack {
                             Button {
@@ -346,6 +431,21 @@ private struct BackupSection: View {
                 } label: {
                     Label("Revocation Certificate", systemImage: "xmark.seal")
                 }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("If your recovery phrase or seed may have been exposed, create a replacement identity rather than continuing to use it.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Text("1. Save and publish the old OpenPGP revocation certificate where appropriate.\n2. Record which services use each old public key.\n3. Remove the old seed only after the replacement phrase is written down and verified.\n4. Repair each integration and replace registered public keys on remote services.")
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } label: {
+                    Label("Replace a Compromised Identity", systemImage: "arrow.triangle.2.circlepath")
+                }
                 Spacer(minLength: 0)
             }
             .padding(24)
@@ -371,8 +471,9 @@ private enum GitSigningMethod: String, CaseIterable, Identifiable {
 
 private struct IntegrationsSection: View {
     @EnvironmentObject private var app: AppModel
-    @State private var openpgpBackend: OpenPGPBackend = .bundled
-    @State private var gitMethod: GitSigningMethod = .ssh
+    @AppStorage("PasseportOpenPGPBackend") private var openpgpBackend: OpenPGPBackend = .bundled
+    @AppStorage("PasseportGitSigningMethod") private var gitMethod: GitSigningMethod = .ssh
+    @AppStorage("PasseportInstallStandardGPGAlias") private var installStandardGPGAlias = false
     @AppStorage("PasseportInstallStandardAgeAlias") private var installStandardAgeAlias = false
     @AppStorage("PasseportInstallStandardMinisignAlias") private var installStandardMinisignAlias = false
 
@@ -525,6 +626,32 @@ private struct IntegrationsSection: View {
         }
     }
 
+    @ViewBuilder
+    private func healthControls(_ integration: PasseportIntegration, repair: @escaping () -> Void) -> some View {
+        let health = app.integrationHealth[integration] ?? .notConfigured
+        HStack(spacing: 10) {
+            Label(health.title, systemImage: health == .working ? "checkmark.circle.fill" : (health == .notConfigured ? "circle" : "exclamationmark.triangle.fill"))
+                .foregroundStyle(health == .working ? .green : (health == .notConfigured ? .secondary : .orange))
+                .font(.caption)
+            Spacer()
+            Button("Test") { app.testIntegration(integration) }
+                .controlSize(.small)
+                .accessibilityLabel("Test \(integration.rawValue) integration")
+                .accessibilityHint("Performs a real private-key operation and verifies its result")
+            if health != .notConfigured {
+                Button("Repair", action: repair)
+                    .controlSize(.small)
+                    .accessibilityLabel("Repair \(integration.rawValue) integration")
+                Button("Remove", role: .destructive) { app.removeIntegration(integration) }
+                    .controlSize(.small)
+                    .accessibilityLabel("Remove \(integration.rawValue) integration")
+            }
+        }
+        if case .broken(let reason) = health {
+            Text(reason).font(.caption).foregroundStyle(.orange)
+        }
+    }
+
     // MARK: - Cards
 
     private var sshCard: some View {
@@ -550,6 +677,7 @@ private struct IntegrationsSection: View {
                 Text("Passeport serves the authentication subkey directly, with no GnuPG dependency. Each signature follows your approval settings.")
                 Label("Configure updates ~/.ssh/config to use the Passeport agent.", systemImage: "info.circle")
                     .font(.caption)
+                healthControls(.ssh) { app.configureSSH() }
             }
         )
     }
@@ -559,7 +687,7 @@ private struct IntegrationsSection: View {
         let enabled = !app.isBusy && hasIdentity && (!needsGnuPG || app.hasLocalGnuPG)
         let configureExplanation = switch openpgpBackend {
         case .bundled:
-            "Configure installs the bundled gpg-compatible command in Application Support and ~/.local/bin, then points Git signing at it."
+            "Configure installs `passeport-gpg` in Application Support and ~/.local/bin, then points Git signing at it. The optional `gpg` alias never replaces a command Passeport does not own."
         case .scdaemon:
             "Configure updates ~/.gnupg/gpg-agent.conf, imports the public key, and connects your existing GnuPG agent to Passeport."
         }
@@ -573,7 +701,7 @@ private struct IntegrationsSection: View {
             actions: {
                 Button("Configure") {
                     switch openpgpBackend {
-                    case .bundled: app.configureGnuFreeGPG()
+                    case .bundled: app.configureGnuFreeGPG(installStandardAlias: installStandardGPGAlias)
                     case .scdaemon: app.configureGnuPG()
                     }
                 }
@@ -587,11 +715,27 @@ private struct IntegrationsSection: View {
                 .pickerStyle(.menu)
                 .frame(maxWidth: 390, alignment: .leading)
                 Text("GNU-free installs Passeport's self-contained gpg-compatible command. Pluggable Scdaemon exposes the identity to your existing gpg-agent as a virtual smartcard.")
+                if openpgpBackend == .bundled {
+                    Toggle("Also install as `gpg`", isOn: $installStandardGPGAlias)
+                        .toggleStyle(.checkbox)
+                }
                 Label(configureExplanation, systemImage: "info.circle")
                     .font(.caption)
-                if app.gnuFreeGPGReady {
-                    Label("GNU-free signer configured", systemImage: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
+                if openpgpBackend == .bundled {
+                    healthControls(.openpgpBundled) { app.configureGnuFreeGPG(installStandardAlias: installStandardGPGAlias) }
+                } else {
+                    let health = app.pluggableGnuPGHealth
+                    HStack {
+                        Label(health.title, systemImage: health == .working ? "checkmark.circle.fill" : (health == .notConfigured ? "circle" : "exclamationmark.triangle.fill"))
+                            .font(.caption)
+                            .foregroundStyle(health == .working ? .green : (health == .notConfigured ? .secondary : .orange))
+                        Spacer()
+                        Button("Test") { app.testPluggableGnuPG() }.controlSize(.small)
+                        if health != .notConfigured {
+                            Button("Repair") { app.configureGnuPG() }.controlSize(.small)
+                            Button("Remove", role: .destructive) { app.removePluggableGnuPG() }.controlSize(.small)
+                        }
+                    }
                 }
             }
         )
@@ -619,7 +763,7 @@ private struct IntegrationsSection: View {
                     case .ssh: app.configureGitSigningSSH()
                     case .pgp:
                         switch openpgpBackend {
-                        case .bundled: app.configureGnuFreeGPG()
+                        case .bundled: app.configureGnuFreeGPG(installStandardAlias: installStandardGPGAlias)
                         case .scdaemon: app.configureGitSigning()
                         }
                     }
@@ -636,6 +780,11 @@ private struct IntegrationsSection: View {
                 Text("SSH-based signing uses the native agent. PGP-based signing follows the OpenPGP backend selected above.")
                 Label(configureExplanation, systemImage: "info.circle")
                     .font(.caption)
+                healthControls(.git) {
+                    if gitMethod == .ssh { app.configureGitSigningSSH() }
+                    else if openpgpBackend == .bundled { app.configureGnuFreeGPG(installStandardAlias: installStandardGPGAlias) }
+                    else { app.configureGitSigning() }
+                }
             }
         )
     }
@@ -659,6 +808,7 @@ private struct IntegrationsSection: View {
                 if let recipient = app.identity?.age.recipient {
                     pathDetail(value: recipient, copyLabel: "age recipient")
                 }
+                healthControls(.age) { app.configureAge(installStandardAlias: installStandardAgeAlias) }
             }
         )
     }
@@ -694,6 +844,7 @@ private struct IntegrationsSection: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
+                healthControls(.minisign) { app.configureMinisign(installStandardAlias: installStandardMinisignAlias) }
             }
         )
     }
@@ -704,6 +855,8 @@ private struct IntegrationsSection: View {
 
 struct SettingsSection: View {
     @EnvironmentObject private var app: AppModel
+    @State private var confirmingClearLog = false
+    @State private var confirmingCleanup = false
 
     var body: some View {
         ScrollView {
@@ -727,7 +880,6 @@ struct SettingsSection: View {
 
                 settingsCard("Operation approval", systemImage: "checkmark.shield") {
                     Toggle("Confirm each signature or decryption", isOn: $app.confirmEachOperation)
-                    Toggle("Require Touch ID for each operation", isOn: $app.requireTouchIDPerOperation)
                     Text("Confirmation shows what is being signed before each operation, protecting against a compromised client using the key silently.")
                         .settingsHelp()
                 }
@@ -746,6 +898,18 @@ struct SettingsSection: View {
                     }
                     .pickerStyle(.menu)
                     .disabled(!app.autoLockOnIdle)
+                }
+
+                settingsCard("Recovery verification", systemImage: "checkmark.shield") {
+                    Picker("Remind me to verify", selection: $app.backupReminderDays) {
+                        Text("Every 30 days").tag(30)
+                        Text("Every 90 days").tag(90)
+                        Text("Every 180 days").tag(180)
+                        Text("Never").tag(0)
+                    }
+                    .pickerStyle(.menu)
+                    Text("When due, Passeport marks the backup on the Backup & Recovery page. Verification checks four randomly selected words without displaying or copying the full phrase.")
+                        .settingsHelp()
                 }
 
                 settingsCard("Operation audit log", systemImage: "list.bullet.rectangle") {
@@ -771,9 +935,45 @@ struct SettingsSection: View {
                     HStack {
                         Button("Refresh") { Task { await app.refreshOperationAuditLog() } }
                         Spacer()
-                        Button("Clear Log", role: .destructive) { app.clearOperationAuditLog() }
+                        Button("Clear Log", role: .destructive) { confirmingClearLog = true }
                             .disabled(app.operationAuditEvents.isEmpty)
                     }
+                    .confirmationDialog("Clear the operation audit log?", isPresented: $confirmingClearLog) {
+                        Button("Clear Log", role: .destructive) { app.clearOperationAuditLog() }
+                    } message: {
+                        Text("This removes Passeport's local record of approved and denied operations.")
+                    }
+                }
+
+                settingsCard("Diagnostics & cleanup", systemImage: "wrench.and.screwdriver") {
+                    Button("Copy Diagnostics") { app.copyDiagnostics() }
+                    Text("Diagnostics include app and integration state, but never keys, recovery words, passwords, or operation contents.")
+                        .settingsHelp()
+                    Divider()
+                    Button("Remove Passeport Configuration…", role: .destructive) { confirmingCleanup = true }
+                    Text("Removes Passeport-owned command links, SSH and Git configuration, public integration files, and the background launcher. Your identity vault remains on disk.")
+                        .settingsHelp()
+                    .confirmationDialog("Remove Passeport-managed configuration?", isPresented: $confirmingCleanup) {
+                        Button("Remove Configuration", role: .destructive) { app.removeAllConfiguration() }
+                    } message: {
+                        Text("The identity seed is not deleted. Files and settings not owned by Passeport are left alone.")
+                    }
+                }
+
+                settingsCard("About Passeport", systemImage: "info.circle") {
+                    HStack {
+                        Text("Passeport \(app.installedVersion) “\(app.releaseCodename)”")
+                        Spacer()
+                        Link(destination: URL(string: "https://mchalunderscore.github.io/passeport/")!) {
+                            Label("Open Website", systemImage: "globe")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    Text("The passport logo is from Solar Bold Icons and is licensed under CC Attribution.")
+                        .settingsHelp()
+                    Button("Check for Updates") { app.checkForUpdates(manual: true) }
+                        .disabled(app.isBusy)
                 }
             }
             .padding(24)
@@ -859,6 +1059,7 @@ private struct ContractWarningBanner: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
+                .accessibilityHidden(true)
             Text(message)
                 .font(.caption)
         }
@@ -866,6 +1067,8 @@ private struct ContractWarningBanner: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.orange.opacity(0.15))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Warning: \(message)")
     }
 }
 
@@ -917,6 +1120,8 @@ private struct IdentityToolbarControl: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .disabled(app.isBusy)
+            .help("Unlock identity")
+            .accessibilityLabel("Unlock identity")
         } else {
             Button {
                 app.lock()
@@ -926,6 +1131,8 @@ private struct IdentityToolbarControl: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(app.isBusy)
+            .help("Lock identity")
+            .accessibilityLabel("Lock identity")
         }
     }
 
@@ -964,6 +1171,8 @@ private struct StatusBar: View {
             .padding(.horizontal, 16)
             .frame(height: 34)
             .background(.bar)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Status: \(app.status)")
         }
     }
 
@@ -1048,7 +1257,9 @@ private struct RecoveryPhraseSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             HStack {
-                Button("Copy") { app.copy(phrase, label: "recovery phrase") }
+                Text("For safety, Passeport does not place recovery phrases on the clipboard.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
@@ -1073,33 +1284,32 @@ private struct PassphraseSheet: View {
 
     private var title: String {
         switch request.purpose {
-        case .create: "Protect with a passphrase?"
-        case .unlock: "Enter your passphrase"
+        case .create: "Protect with a password?"
+        case .unlock: "Enter your password"
         }
     }
 
     private var explanation: String {
         switch request.purpose {
         case .create:
-            "Optionally add a passphrase — a “25th word” that is never stored and never leaves your memory. With it, your recovery phrase alone cannot reconstruct this identity. Leave blank to skip."
+            "Optionally choose a password to encrypt the local seed vault. Leave it blank to store the seed without encryption. The password does not affect the derived keys."
         case .unlock:
-            "This identity is protected by a passphrase. Enter it to unlock — it is checked before your keys are derived."
+            "This vault is password protected. Enter its password to unlock the identity."
         }
     }
 
     /// Create asks twice to guard against a typo; the entry can't be verified,
     /// so a mismatch there would silently create a different identity.
-    private var needsConfirmation: Bool { request.purpose == .create && !passphrase.isEmpty }
+    private var needsConfirmation: Bool { request.purpose == .create }
 
     private var canSubmit: Bool {
         if isUnlock { return !passphrase.isEmpty }
-        if needsConfirmation { return passphrase == confirmation }
-        return true
+        return passphrase == confirmation
     }
 
     private var submitLabel: String {
         switch request.purpose {
-        case .create: passphrase.isEmpty ? "Skip" : "Create"
+        case .create: "Create"
         case .unlock: "Unlock"
         }
     }
@@ -1112,16 +1322,16 @@ private struct PassphraseSheet: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            SecureField("Passphrase", text: $passphrase)
+            SecureField(isUnlock ? "Password" : "Password (optional)", text: $passphrase)
                 .textFieldStyle(.roundedBorder)
                 .focused($focused)
                 .onSubmit { if canSubmit { submit() } }
             if needsConfirmation {
-                SecureField("Confirm passphrase", text: $confirmation)
+                SecureField("Confirm password", text: $confirmation)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { if canSubmit { submit() } }
                 if !confirmation.isEmpty && passphrase != confirmation {
-                    Text("Passphrases don’t match.")
+                    Text("Passwords don’t match.")
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
@@ -1151,22 +1361,65 @@ private struct PassphraseSheet: View {
     }
 }
 
+private struct ResetSeedSheet: View {
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmation = ""
+    @FocusState private var confirmationFocused: Bool
+
+    private var needsTypedConfirmation: Bool { app.backupVerifiedAt == nil }
+    private var canDelete: Bool { !needsTypedConfirmation || confirmation == "DELETE" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Remove the Seed from This Mac?")
+                .font(.title3.weight(.semibold))
+            Label(
+                app.backupVerifiedAt == nil ? "This recovery phrase has never been verified." : "Recovery phrase verified \(app.backupVerifiedAt!.formatted(date: .abbreviated, time: .omitted)).",
+                systemImage: app.backupVerifiedAt == nil ? "exclamationmark.triangle.fill" : "checkmark.shield.fill"
+            )
+            .foregroundStyle(app.backupVerifiedAt == nil ? .red : .green)
+            Text("Deleting the seed permanently removes this identity from the Mac. Installed aliases, Git settings, SSH settings, and launch agents are separate and can be removed from Settings.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            if needsTypedConfirmation {
+                Text("Type DELETE to confirm without a verified backup.")
+                    .font(.caption)
+                TextField("DELETE", text: $confirmation)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($confirmationFocused)
+            }
+            HStack {
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Delete Seed", role: .destructive) {
+                    app.resetSeed()
+                    dismiss()
+                }
+                .disabled(!canDelete)
+            }
+        }
+        .padding(28)
+        .frame(width: 500)
+        .onAppear { confirmationFocused = needsTypedConfirmation }
+    }
+}
+
 private struct RestoreSheet: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var words = Array(repeating: "", count: 24)
     @State private var passphrase = ""
     @State private var passphraseConfirmation = ""
+    @State private var confirmingReplacement = false
     @FocusState private var focusedWord: Int?
 
     private var isComplete: Bool {
         words.allSatisfy { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
-    /// A restore passphrase can't be verified against anything, and a typo
-    /// silently derives a different identity *and* records a verifier that
-    /// then rejects the correct passphrase — so, like the create flow, ask
-    /// twice.
+    /// Confirm a supplied password to avoid making the restored vault inaccessible.
     private var passphraseMatches: Bool {
         passphrase.isEmpty || passphrase == passphraseConfirmation
     }
@@ -1189,30 +1442,25 @@ private struct RestoreSheet: View {
                     set: { distribute($0, from: index) }
                 ))
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Recovery word \(index + 1)")
                 .frame(width: 104)
                 .focused($focusedWord, equals: index)
-                .onKeyPress(.tab) {
-                    moveFocus(from: index)
-                    return .handled
-                }
             }
             .padding(.top, 4)
             .padding(.bottom, 2)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Passphrase (optional)")
+                Text("Vault password (optional)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                SecureField("Only if this identity was created with one", text: $passphrase)
+                SecureField("Leave blank for an unencrypted vault", text: $passphrase)
                     .textFieldStyle(.roundedBorder)
-                if !passphrase.isEmpty {
-                    SecureField("Confirm passphrase", text: $passphraseConfirmation)
-                        .textFieldStyle(.roundedBorder)
-                    if !passphraseConfirmation.isEmpty && !passphraseMatches {
-                        Text("Passphrases don’t match.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
+                SecureField("Confirm password", text: $passphraseConfirmation)
+                    .textFieldStyle(.roundedBorder)
+                if !passphraseConfirmation.isEmpty && !passphraseMatches {
+                    Text("Passwords don’t match.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
             }
 
@@ -1220,11 +1468,11 @@ private struct RestoreSheet: View {
                 Button("Cancel", role: .cancel) { dismiss() }
                 Spacer()
                 Button("Restore") {
-                    app.restore(fromPhrase: phrase, passphrase: passphrase)
-                    dismiss()
+                    if app.hasSeed { confirmingReplacement = true }
+                    else { beginRestore() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!isComplete || !passphraseMatches)
+                .disabled(app.isBusy || !isComplete || !passphraseMatches)
                 .frame(minWidth: 112)
             }
             .padding(.top, 4)
@@ -1235,6 +1483,25 @@ private struct RestoreSheet: View {
         // must stay under that.
         .frame(width: 660)
         .onAppear { focusedWord = 0 }
+        .onChange(of: app.restoreCompletedID) { _, completed in
+            if completed != nil { dismiss() }
+        }
+        .confirmationDialog(
+            "Replace the identity stored on this Mac?",
+            isPresented: $confirmingReplacement
+        ) {
+            Button("Replace Identity", role: .destructive) { beginRestore() }
+        } message: {
+            if let fingerprint = app.identity?.pgp.fingerprint {
+                Text("The current identity (OpenPGP fingerprint …\(fingerprint.suffix(16))) will be replaced after the imported identity is validated. Installed integrations will require repair.")
+            } else {
+                Text("The current stored identity will be replaced after the imported identity is validated. Installed integrations will require repair.")
+            }
+        }
+    }
+
+    private func beginRestore() {
+        app.restore(fromPhrase: phrase, passphrase: passphrase)
     }
 
     /// Support pasting a full phrase into any box: split on whitespace and fill
@@ -1250,9 +1517,6 @@ private struct RestoreSheet: View {
         }
     }
 
-    private func moveFocus(from index: Int) {
-        focusedWord = min(index + 1, 23)
-    }
 }
 
 private struct BackupDrillSheet: View {
@@ -1260,6 +1524,7 @@ private struct BackupDrillSheet: View {
     @Environment(\.dismiss) private var dismiss
     let session: BackupDrillSession
     @State private var answers: [String]
+    @FocusState private var focusedAnswer: Int?
 
     init(session: BackupDrillSession) {
         self.session = session
@@ -1280,6 +1545,8 @@ private struct BackupDrillSheet: View {
                         .frame(width: 85, alignment: .leading)
                     TextField("", text: $answers[offset])
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Recovery word \(position + 1)")
+                        .focused($focusedAnswer, equals: offset)
                 }
             }
 
@@ -1288,13 +1555,13 @@ private struct BackupDrillSheet: View {
                     dismiss()
                     app.dismissBackupDrill()
                 }
+                .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Verify") {
                     app.submitBackupDrill(answers: answers)
-                    dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(app.isBusy)
+                .disabled(app.isBusy || answers.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
             }
             .padding(.top, 4)
         }
@@ -1302,6 +1569,7 @@ private struct BackupDrillSheet: View {
         .frame(width: 420)
         .onAppear {
             answers = Array(repeating: "", count: session.wordIndices.count)
+            focusedAnswer = 0
         }
     }
 }

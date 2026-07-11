@@ -39,6 +39,16 @@
                ReferencedContainer = "container:Passeport.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "01F004000000000000000003"
+               BuildableName = "PasseportUITests.xctest"
+               BlueprintName = "PasseportUITests"
+               ReferencedContainer = "container:Passeport.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

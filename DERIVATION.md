@@ -1,8 +1,4 @@
-# Passeport Derivation Contract v2
-
-Changes from v1: the standalone SSH key (`passeport-ssh-v1`) is gone. The SSH
-identity is the OpenPGP authentication subkey, served through gpg-agent's
-ssh-agent support. OpenPGP derivation is byte-identical to v1.
+# Passeport Derivation Contract
 
 This file defines the compatibility contract for keys derived from the root
 seed. Changing any existing salt, label, timestamp, or key encoding creates a
@@ -14,24 +10,18 @@ them would change every derived key.
 
 ## Input
 
-The root secret is a random 32-byte seed stored **device-local** as a
-generic-password item in the macOS data-protection keychain, user-presence
-protected (service `passeport.seed.secure`, account `default`). It is not
-synchronizable and never leaves the machine; the portable form is its 24-word
-BIP39 encoding (the seed *is* the mnemonic entropy — see Recovery phrase below).
-
-An **optional passphrase** ("25th word") can stretch the seed into the
-effective root material before the PRF (see Passphrase below). Without a
-passphrase the effective material *is* the seed, so this section and everything
-below are byte-identical to the pre-passphrase contract. The root input keying
-material is:
+The root secret is a random 32-byte seed stored **device-local** in
+`~/Library/Application Support/Passeport/identity.vault`. Its directory is mode
+`0700` and the vault file is mode `0600`. The vault can optionally be encrypted
+with a password. It is not synchronizable and never leaves the machine; the
+portable form is its 24-word BIP39 encoding (the seed *is* the mnemonic entropy
+— see Recovery phrase below). The root input keying material is:
 
 ```text
-root = HMAC-SHA256(key = effective_material, data = "passeport root v1")
+root = HMAC-SHA256(key = seed, data = "passeport root v1")
 ```
 
-where `effective_material = seed` with no passphrase. The 32-byte HMAC output is
-not stored on disk.
+The 32-byte HMAC output is not stored on disk.
 
 ## Recovery phrase
 
@@ -42,39 +32,22 @@ phrase on another Mac writes back the same seed and reproduces every derived
 key. The phrase format is BIP39-interoperable, but the keys derived from it are
 Ed25519/Curve25519, unrelated to a wallet's secp256k1 keys.
 
-## Passphrase ("25th word")
+## Optional vault password
 
-An optional passphrase domain-separates the identity so the 24-word phrase
-alone is no longer sufficient. It is **never stored** — it is entered per
-unlock (prompted alongside Touch ID at derive/restore, cached in memory until
-auto-lock) and mixed with the seed *in the app*, before the PRF, so the Rust
-helper's contract is untouched.
+The password protects only the local vault and is not an input to identity
+derivation. When configured during creation or restoration, it derives the
+vault encryption key:
 
 ```text
-effective_material =
-    seed                                              if passphrase is empty
-    PBKDF2-HMAC-SHA512(                                otherwise
-        password   = utf8(passphrase),
-        salt       = "passeport-25th-word-v1" || seed,
-        iterations = 210000,
-        dkLen      = 32)
+vault_key = PBKDF2-HMAC-SHA512(
+    password   = utf8(password),
+    salt       = random 32-byte vault salt,
+    iterations = 600000,
+    dkLen      = 32)
 ```
 
-`effective_material` replaces `seed` as the HMAC key in the root step above.
-An empty passphrase yields `effective_material = seed`, keeping existing
-(no-passphrase) identities byte-identical — the passphrase is a strictly
-additive, opt-in layer, chosen at identity creation or restore.
-
-To catch a mistyped passphrase (which would otherwise silently derive a
-*different* valid identity), a public verifier is stored locally and checked
-before keys are derived:
-
-```text
-verifier = HMAC-SHA256(key = effective_material, data = "passeport-passphrase-verifier-v1")
-```
-
-The verifier is a one-way commitment to the correct material; it reveals no
-more than the (already public) derived keys and never the passphrase.
+ChaCha20-Poly1305 authentication rejects a wrong password before the seed is
+loaded. Without a password, the seed is stored directly in the private vault.
 
 ## Expansion
 
@@ -85,7 +58,7 @@ salt = "passeport-passkey-v1"
 ikm  = root (HMAC output above)
 ```
 
-Current info labels:
+Info labels:
 
 ```text
 passeport-pgp-v1      -> 32-byte ChaCha20 RNG seed for OpenPGP key generation
@@ -93,15 +66,13 @@ passeport-minisign-v1 -> 32-byte Ed25519 seed for the minisign signing key
 ```
 
 Both share `salt = "passeport-passkey-v1"` and the same `root`; the distinct
-`info` labels make the two keys cryptographically independent (HKDF-Expand
-domain separation). Adding the minisign label does not touch the OpenPGP RNG
-stream, so all pre-existing keys are byte-identical.
+`info` labels make the two keys cryptographically independent through
+HKDF-Expand domain separation.
 
 ## SSH
 
 The SSH identity is the Ed25519 OpenPGP authentication subkey; its OpenSSH
-public-key form is reported by the Rust helper. There is no separate SSH
-derivation and no exportable standalone SSH private key.
+public-key form is reported by the Rust helper.
 
 ## OpenPGP
 
@@ -136,10 +107,10 @@ it is *not* one of the card slots). The 32-byte output is the Ed25519 seed.
   global signature are both bare Ed25519 over the standard minisign inputs.
 
 The private signing op runs through the same bridge as everything else (a
-`minisignsign` request, Touch ID / approval / audit gated); verification is
+`minisignsign` request, unlock / approval / audit gated); verification is
 fully public.
 
-## Self-contained gpg (Mode 2)
+## GNU-free OpenPGP
 
 The helper has a third front end, invoked as `passeport-core gpg …` (or under a
 `gpg`/`passeport-gpg` program name), that is a self-contained, pure-Rust `gpg`
@@ -153,10 +124,10 @@ its own cv25519 subkey (public, no bridge), and **decrypts** — the one operati
 that needs the private scalar, so it runs inside the gated `op` process (a
 `pgpdecrypt` request): that process reconstructs the full secret key from the
 seed and lets rpgp decrypt, returning only the plaintext. The seed never reaches
-the shim. This coexists with the scdaemon mode; the two are selected by which
-program git's `gpg.program` points at.
+the shim. The app selects this backend by pointing Git at the installed
+`passeport-gpg` command.
 
-## Virtual smartcard (scdaemon mode)
+## Pluggable Scdaemon
 
 The helper has a second mode, `passeport-core scd`, that speaks the scdaemon
 Assuan protocol so gpg-agent can drive the derived identity as if it were a
@@ -179,20 +150,12 @@ parameters `p,a,b,g,n,q`) and are verified byte-for-byte against
 DigestInfo prefix to card sign/auth operations; the daemon strips recognized
 prefixes and signs the remainder with a bare EdDSA.
 
-SSH support is inherited for free: with `enable-ssh-support` in
-`gpg-agent.conf`, gpg-agent serves the AUT slot over its ssh-agent socket, so
-`SSH_AUTH_SOCK` pointed at that socket exposes the authentication subkey as an
-`ssh-ed25519` key — the same mechanism a YubiKey uses.
-
 The daemon delegates every private operation to a `CryptoBackend`:
 
 - `PASSEPORT_SCD_SOCKET=<path>` — production. The shim connects to a Unix
   socket served by the running Passeport app (`ScdBridge`) and sends one JSON
   request per operation (`pubkeys` / `sign` / `ecdh`). The app unlocks the
-  seed behind Touch ID, runs the op via `passeport-core op`, and returns only
+  encrypted seed vault, runs the op via `passeport-core op`, and returns only
   the result. The seed never reaches the shim.
-- `PASSEPORT_SCD_PRF=<base64url>` — development. The shim derives in-process.
-
 The socket protocol and the `op` subcommand share one request/response schema
-(see `src/ops.rs`), so the app is a thin root-secret-injecting relay in front
-of the same crypto the dev backend runs.
+(see `src/ops.rs`).

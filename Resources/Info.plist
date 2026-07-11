@@ -6,7 +6,7 @@
   <key>CFBundleExecutable</key>
   <string>Passeport</string>
   <key>CFBundleIdentifier</key>
-  <string>lol.mchal.passeport</string>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
   <key>CFBundleName</key>
   <string>Passeport</string>
 	<key>CFBundleDisplayName</key>
@@ -15,10 +15,18 @@
 	<string>Passeport</string>
 	<key>CFBundleIconName</key>
 	<string>Passeport</string>
+	<key>CFBundleHelpBookFolder</key>
+	<string>Passeport.help</string>
+	<key>CFBundleHelpBookName</key>
+	<string>lol.mchal.passeport.help</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
   <key>CFBundleShortVersionString</key>
   <string>0.1.0</string>
+	<key>PasseportReleaseCodename</key>
+	<string>Mi Goreng</string>
+	<key>PasseportGitCommit</key>
+	<string>unknown</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>

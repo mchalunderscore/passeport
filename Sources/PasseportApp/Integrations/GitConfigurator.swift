@@ -4,6 +4,92 @@ import Foundation
 /// through GnuPG (OpenPGP signatures) or SSH (`gpg.format=ssh`, signed via the
 /// native agent) — the two toolchains Passeport supports.
 enum GitConfigurator {
+    enum RemovalSafety: Equatable {
+        case safe
+        case legacyStateUnknown
+    }
+
+    static func removalSafety(hasManagedState: Bool, isConfigured: Bool) -> RemovalSafety {
+        !hasManagedState && isConfigured ? .legacyStateUnknown : .safe
+    }
+
+    static func preflightRemoval() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let wrapper = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Passeport/passeport-ssh-sign")
+        let hasManagedFiles = FileManager.default.fileExists(atPath: wrapper.path)
+            || FileManager.default.fileExists(atPath: home.appendingPathComponent(".ssh/passeport-signing.pub").path)
+        try requireReadableManagedState()
+        guard (try? locateGit()) != nil else {
+            if loadManagedState() != nil || hasManagedFiles { throw GitError.gitNotFound }
+            return
+        }
+        let disposition = removalSafety(
+            hasManagedState: loadManagedState() != nil,
+            isConfigured: health != .notConfigured
+        )
+        guard disposition == .safe else {
+            throw GitError.commandFailed(
+                "This Git integration predates reversible configuration tracking. Passeport cannot determine the values it replaced, so no configuration was removed."
+            )
+        }
+    }
+
+    private struct ManagedSetting: Codable {
+        let key: String
+        let previousValue: String?
+        var managedValue: String
+    }
+
+    private struct ManagedState: Codable {
+        var settings: [ManagedSetting]
+    }
+
+    private static var stateURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Passeport", isDirectory: true)
+            .appendingPathComponent("git-managed-state.json")
+    }
+
+    static var health: IntegrationHealth {
+        guard let git = try? locateGit() else { return .broken("Git is not available.") }
+        let format = (try? run(git, ["config", "--global", "--get", "gpg.format"]))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let program = (try? run(git, ["config", "--global", "--get", "gpg.program"])) ?? ""
+        let sshProgram = (try? run(git, ["config", "--global", "--get", "gpg.ssh.program"])) ?? ""
+        let managed = program.contains("Passeport/openpgp-mode2") || sshProgram.contains("Passeport/passeport-ssh-sign")
+        guard managed else { return .notConfigured }
+        let enabled = (try? run(git, ["config", "--global", "--get", "commit.gpgsign"]))?.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+        if !enabled { return .broken("Git is pointed at Passeport, but commit signing is disabled.") }
+        if format == "ssh" && !FileManager.default.fileExists(atPath: sshProgram.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return .broken("Git's Passeport SSH signing wrapper is missing.")
+        }
+        if format != "ssh" && !FileManager.default.fileExists(atPath: program.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return .broken("Git's Passeport OpenPGP command is missing.")
+        }
+        return .working
+    }
+
+    static func remove() throws {
+        let git = try locateGit()
+        try preflightRemoval()
+        if let state = loadManagedState() {
+            for setting in state.settings where readSetting(git, setting.key) == setting.managedValue {
+                if let previous = setting.previousValue {
+                    try run(git, ["config", "--global", setting.key, previous])
+                } else {
+                    _ = try? run(git, ["config", "--global", "--unset-all", setting.key])
+                }
+            }
+            try? FileManager.default.removeItem(at: stateURL)
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        for path in [".ssh/passeport-signing.pub", ".ssh/passeport_allowed_signers"] {
+            try? FileManager.default.removeItem(at: home.appendingPathComponent(path))
+        }
+        let wrapper = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Passeport/passeport-ssh-sign")
+        try? FileManager.default.removeItem(at: wrapper)
+    }
     struct Result {
         let gitPath: String
         let signingKey: String
@@ -22,6 +108,7 @@ enum GitConfigurator {
     enum GitError: LocalizedError {
         case gitNotFound
         case commandFailed(String)
+        case corruptManagedState
 
         var errorDescription: String? {
             switch self {
@@ -29,6 +116,8 @@ enum GitConfigurator {
                 "Could not find the git binary. Install git or the Xcode command line tools."
             case .commandFailed(let message):
                 "git config failed: \(message)"
+            case .corruptManagedState:
+                "Passeport's saved Git configuration snapshot is corrupt. No Git settings were changed; restore or remove git-managed-state.json manually before trying again."
             }
         }
     }
@@ -46,9 +135,7 @@ enum GitConfigurator {
             ("commit.gpgsign", "true"),
             ("tag.gpgsign", "true"),
         ]
-        for (key, value) in settings {
-            try run(git, ["config", "--global", key, value])
-        }
+        try applyManagedSettings(settings, git: git)
         return Result(gitPath: git.path, signingKey: fingerprint)
     }
 
@@ -95,9 +182,7 @@ enum GitConfigurator {
             ("gpg.ssh.allowedSignersFile", allowedPath.path),
             ("gpg.ssh.program", signingProgram),
         ]
-        for (key, value) in settings {
-            try run(git, ["config", "--global", key, value])
-        }
+        try applyManagedSettings(settings, git: git)
 
         return SSHSigningResult(
             gitPath: git.path,
@@ -158,6 +243,44 @@ enum GitConfigurator {
             return URL(fileURLWithPath: path)
         }
         throw GitError.gitNotFound
+    }
+
+    private static func readSetting(_ git: URL, _ key: String) -> String? {
+        let value = (try? run(git, ["config", "--global", "--get", key]))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    private static func loadManagedState() -> ManagedState? {
+        guard let data = try? Data(contentsOf: stateURL) else { return nil }
+        return try? JSONDecoder().decode(ManagedState.self, from: data)
+    }
+
+    static func managedStateDataIsValid(_ data: Data) -> Bool {
+        (try? JSONDecoder().decode(ManagedState.self, from: data)) != nil
+    }
+
+    private static func requireReadableManagedState() throws {
+        guard FileManager.default.fileExists(atPath: stateURL.path) else { return }
+        guard let data = try? Data(contentsOf: stateURL), managedStateDataIsValid(data) else {
+            throw GitError.corruptManagedState
+        }
+    }
+
+    private static func applyManagedSettings(_ settings: [(String, String)], git: URL) throws {
+        try requireReadableManagedState()
+        var state = loadManagedState() ?? ManagedState(settings: [])
+        for (key, value) in settings {
+            if let index = state.settings.firstIndex(where: { $0.key == key }) {
+                state.settings[index].managedValue = value
+            } else {
+                state.settings.append(ManagedSetting(key: key, previousValue: readSetting(git, key), managedValue: value))
+            }
+        }
+        try FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(state)
+        try data.write(to: stateURL, options: .atomic)
+        for (key, value) in settings { try run(git, ["config", "--global", key, value]) }
     }
 
     @discardableResult
