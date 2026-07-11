@@ -38,7 +38,7 @@ removal can restore the previous Git and GnuPG values safely.
 
 ## Requirements
 
-- macOS 15 or newer.
+- macOS 26 or newer.
 - Xcode with the Swift 6 toolchain.
 - Rust toolchain for building `passeport-core`.
 - An existing GnuPG installation only when using Pluggable Scdaemon.
