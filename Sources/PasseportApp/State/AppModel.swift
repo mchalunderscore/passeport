@@ -447,7 +447,7 @@ final class AppModel: ObservableObject {
     }
 
     var installedVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.0"
     }
 
     var releaseCodename: String {
