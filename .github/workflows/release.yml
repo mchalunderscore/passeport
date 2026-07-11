@@ -23,6 +23,15 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Verify tag matches app version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          if [ "$TAG_VERSION" != "$APP_VERSION" ]; then
+            echo "Release tag $GITHUB_REF_NAME does not match app version $APP_VERSION" >&2
+            exit 1
+          fi
+
       - name: Build DMG
         run: |
           scripts/make-dmg.sh
