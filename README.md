@@ -288,3 +288,10 @@ the app under its approval policy; only public/framing work happens in the CLIs.
 - **Start Passeport on demand (background launcher)** installs a LaunchAgent
   that socket-activates the app, so gpg/ssh work even if the app was not
   already running.
+
+## Credits
+
+The Passeport logo comes from the
+[Solar Bold Icons](https://www.svgrepo.com/svg/526073/passport#:~:text=COLLECTION%3A-,Solar%20Bold%20Icons,-LICENSE%3A%20CC)
+collection on SVG Repo and is used under its
+[CC Attribution license](https://www.svgrepo.com/page/licensing/#CC%20Attribution).

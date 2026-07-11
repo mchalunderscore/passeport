@@ -3,6 +3,13 @@ helper executable, passeport-core, links permissively licensed Rust crates.
 The age-format implementation is provided by the following upstream library:
 
 --------------------------------------------------------------------------------
+Passeport logo — Solar Bold Icons
+    Source: https://www.svgrepo.com/svg/526073/passport
+    Collection: Solar Bold Icons
+    Provided by SVG Repo under the CC Attribution license:
+    https://www.svgrepo.com/page/licensing/#CC%20Attribution
+
+--------------------------------------------------------------------------------
 age Rust library — https://github.com/str4d/rage
     Copyright (c) The rage Developers
     Distributed by Passeport under the MIT license option:
@@ -32,11 +39,3 @@ passeport-core — this project
     Licensed under the MIT license.
     (Key derivation, scdaemon dialect, age/plugin CLI integration, the
     self-contained `minisign` CLI, and the pure-Rust `gpg` drop-in for Mode 2.)
-
---------------------------------------------------------------------------------
-Explicitly NOT bundled: sequoia-chameleon-gnupg. It is GPL-3.0-or-later, links
-native (L)GPL crypto (Nettle/GMP or OpenSSL), and requires an external GnuPG
-gpg-agent — so it cannot be part of a permissive, self-contained, GNU-free
-distribution. Passeport's OpenPGP support is provided instead by the pure-Rust
-`passeport-core gpg` drop-in (Mode 2), which delegates the private-key operation
-to the app over the Touch ID-gated bridge.
