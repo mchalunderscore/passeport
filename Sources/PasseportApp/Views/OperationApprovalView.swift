@@ -65,7 +65,10 @@ enum OperationApproval {
         )
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = true
+        // AppKit shadows a borderless window using its rectangular frame,
+        // even though the SwiftUI panel chrome is rounded. On a transparent
+        // window that appears as a dark bounding box around the glass panel.
+        window.hasShadow = false
         window.isMovableByWindowBackground = true
         window.level = .modalPanel
 
@@ -75,6 +78,8 @@ enum OperationApproval {
             NSApp.stopModal()
         }
         let hosting = NSHostingView(rootView: view)
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
         hosting.setFrameSize(hosting.fittingSize)
         window.setContentSize(hosting.fittingSize)
         window.contentView = hosting
@@ -112,7 +117,9 @@ enum PassphraseUnlock {
         )
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = true
+        // Keep AppKit from drawing a rectangular shadow around the rounded
+        // SwiftUI glass surface.
+        window.hasShadow = false
         window.isMovableByWindowBackground = true
         window.level = .modalPanel
 
@@ -122,6 +129,8 @@ enum PassphraseUnlock {
             NSApp.stopModal()
         }
         let hosting = NSHostingView(rootView: view)
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
         hosting.setFrameSize(hosting.fittingSize)
         window.setContentSize(hosting.fittingSize)
         window.contentView = hosting

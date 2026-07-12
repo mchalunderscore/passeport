@@ -17,7 +17,12 @@ struct PasseportApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Passeport", id: "main") {
+        // Passeport is a single-window utility. A WindowGroup permits SwiftUI
+        // to create another ContentView for the same shared AppModel, so a
+        // newly opened instance can mirror transient UI such as the unlock
+        // password sheet. Window keeps the main scene single-instance while
+        // still allowing the menu-bar item to reveal it via openWindow(id:).
+        Window("Passeport", id: "main") {
             ContentView()
                 .environmentObject(appModel)
                 .frame(minWidth: 860, minHeight: 600)
