@@ -63,6 +63,7 @@ private struct GitHubRelease: Decodable {
 
 private final class AppModelMonitorState: @unchecked Sendable {
     var auditLogObserver: NSObjectProtocol?
+    var seedUnlockObserver: NSObjectProtocol?
     var workspaceObservers: [NSObjectProtocol] = []
     var distributedObservers: [NSObjectProtocol] = []
     var globalEventMonitor: Any?
@@ -78,6 +79,9 @@ private final class AppModelMonitorState: @unchecked Sendable {
         if let observer = auditLogObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = seedUnlockObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         workspaceObservers.forEach { observer in
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
@@ -88,6 +92,7 @@ private final class AppModelMonitorState: @unchecked Sendable {
         globalEventMonitor = nil
         localEventMonitor = nil
         auditLogObserver = nil
+        seedUnlockObserver = nil
         workspaceObservers.removeAll()
         distributedObservers.removeAll()
     }
@@ -171,6 +176,9 @@ final class AppModel: ObservableObject {
     /// Deferred work scheduled by the current `runBusy` operation, run after
     /// `isBusy` clears so the follow-up's own `runBusy` isn't rejected.
     private var pendingFollowUp: (() -> Void)?
+    /// A bridge-triggered vault unlock that arrived while another frontend
+    /// operation was busy and must be reflected once that operation finishes.
+    private var pendingSeedUnlockSync = false
     private static let pgpUserIDKey = "PasseportPGPUserID"
     private static let hideDockIconKey = "PasseportHideDockIcon"
     private static let confirmEachOperationKey = "PasseportConfirmEachOperation"
@@ -215,6 +223,7 @@ final class AppModel: ObservableObject {
         setupAutoLockMonitoring()
         startAutoLockTask()
         startOperationAuditObserver()
+        startSeedUnlockObserver()
         applyAppearancePolicy()
         Task {
             await self.refreshOperationAuditLog()
@@ -1142,6 +1151,34 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Keep frontend identity state aligned with the actor-owned vault cache.
+    /// CLI, SSH-agent, and GnuPG bridge operations can unlock that cache
+    /// without going through `runUnlock`, so they must explicitly wake the UI.
+    private func startSeedUnlockObserver() {
+        monitorState.seedUnlockObserver = NotificationCenter.default.addObserver(
+            forName: .passeportSeedDidUnlock,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.synchronizeBridgeUnlock()
+            }
+        }
+    }
+
+    private func synchronizeBridgeUnlock() async {
+        guard identity == nil, await SeedStore.canDeriveSilently() else {
+            pendingSeedUnlockSync = false
+            return
+        }
+        guard !isBusy else {
+            pendingSeedUnlockSync = true
+            return
+        }
+        pendingSeedUnlockSync = false
+        runDerive(status: "Identity unlocked by private operation")
+    }
+
     // MARK: - Auto-lock
 
     private func setupAutoLockMonitoring() {
@@ -1240,6 +1277,11 @@ final class AppModel: ObservableObject {
             if let followUp = pendingFollowUp {
                 pendingFollowUp = nil
                 followUp()
+            }
+            if pendingSeedUnlockSync {
+                Task { @MainActor in
+                    await self.synchronizeBridgeUnlock()
+                }
             }
         }
     }

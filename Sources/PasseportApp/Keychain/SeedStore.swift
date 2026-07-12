@@ -3,6 +3,13 @@ import CryptoKit
 import Foundation
 import Security
 
+extension Notification.Name {
+    /// Posted after the in-process vault cache becomes usable. This lets UI
+    /// state catch up when a bridge operation, rather than the main window,
+    /// supplied the vault password.
+    static let passeportSeedDidUnlock = Notification.Name("PasseportSeedDidUnlock")
+}
+
 @globalActor
 actor SeedStoreActor {
     static let shared = SeedStoreActor()
@@ -238,6 +245,7 @@ enum SeedStore {
     private static func cache(seed: Data) {
         cachedSeed = seed
         cachedMaterial = seed
+        NotificationCenter.default.post(name: .passeportSeedDidUnlock, object: nil)
     }
 
     // MARK: - Testable crypto helpers
